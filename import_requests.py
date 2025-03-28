@@ -15,7 +15,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import sys
-from database import JobDatabase
 
 # Set up logging
 logging.basicConfig(
@@ -38,13 +37,48 @@ if not WEBHOOK_URL or not AIRTABLE_URL or not RESEARCH_WEBHOOK_URL or not UNIVER
 BASE_DIR = os.path.join(os.getcwd(), "job_data")
 CSV_DIR = os.path.join(BASE_DIR, "csv_files")
 FILTERED_EXCEL = os.path.join(BASE_DIR, "filtered_jobs.xlsx")
+HISTORY_FILE = os.path.join(BASE_DIR, 'job_history.json')
 
 # Create directories if they don't exist
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(CSV_DIR, exist_ok=True)
 
-# Initialize database
-db = JobDatabase()
+# Load job history from file
+def load_job_history():
+    try:
+        if os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, 'r') as f:
+                data = json.load(f)
+                logger.info(f"Loaded {len(data)} previously seen jobs from history")
+                return data
+        logger.info("No job history found, starting fresh")
+        return {}
+    except Exception as e:
+        logger.error(f"Error loading job history: {e}")
+        return {}
+
+def save_job_history(history):
+    try:
+        with open(HISTORY_FILE, 'w') as f:
+            json.dump(history, f, indent=2)
+        logger.info(f"Saved {len(history)} jobs to history")
+        
+        # If running in GitHub Actions, commit the changes
+        if os.getenv('GITHUB_ACTIONS'):
+            try:
+                os.system('git config --global user.name "github-actions"')
+                os.system('git config --global user.email "actions@github.com"')
+                os.system(f'git add {HISTORY_FILE}')
+                os.system('git commit -m "Update job history" || echo "No changes to commit"')
+                os.system('git push')
+                logger.info("Committed job history changes to repository")
+            except Exception as e:
+                logger.error(f"Error committing job history: {e}")
+    except Exception as e:
+        logger.error(f"Error saving job history: {e}")
+
+# Load initial job history
+job_history = load_job_history()
 
 # Target companies to filter for (including TikTok)
 TARGET_COMPANIES = [
@@ -90,17 +124,16 @@ TARGET_COMPANIES = [
 # ---------------- Helper Functions ----------------
 
 def is_new_job(job):
-    """Check if a job is new using the database."""
-    return not db.is_job_seen(job['Company'], job['Position Title'])
+    """Check if a job is new using file history."""
+    key = f"{job['Company']} - {job['Position Title']}"
+    return key not in job_history
 
 def mark_job_seen(job):
-    """Mark a job as seen in the database."""
-    return db.mark_job_seen(
-        company=job['Company'],
-        position_title=job['Position Title'],
-        apply_url=job.get('Apply'),
-        date_posted=job.get('Date')
-    )
+    """Mark a job as seen in file history."""
+    key = f"{job['Company']} - {job['Position Title']}"
+    job_history[key] = str(datetime.utcnow())
+    save_job_history(job_history)
+    return True
 
 def setup_driver():
     chrome_options = Options()
@@ -235,16 +268,8 @@ def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
                     message += f"Apply: {job['Apply']}\n"
                 message += "\n"
                 
-                # Save job to MongoDB
-                job_data = {
-                    "company": job['Company'],
-                    "position_title": job['Position Title'],
-                    "apply_url": job.get('Apply'),
-                    "date_posted": job.get('Date'),
-                    "date_seen": datetime.utcnow(),
-                    "category": label  # Add category to track which type of job it is
-                }
-                db.jobs.insert_one(job_data)
+                # Mark job as seen
+                mark_job_seen(job)
             
             # Send to Discord
             payload = {"content": message}
@@ -258,7 +283,7 @@ def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
             # Add delay between chunks
             time.sleep(1)
         
-        logger.info(f"Successfully sent all {label} to Discord and saved to database")
+        logger.info(f"Successfully sent all {label} to Discord")
         
     except Exception as e:
         logger.error(f"Error sending to Discord: {e}")
@@ -301,12 +326,32 @@ def download_airtable_csv(driver):
         logger.error(f"Error downloading CSV: {e}")
         raise
 
+def cleanup_old_jobs():
+    """Remove jobs older than 30 days from history."""
+    current_time = datetime.utcnow()
+    old_jobs = []
+    
+    for key, date_str in job_history.items():
+        try:
+            job_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            if (current_time - job_date).days > 30:
+                old_jobs.append(key)
+        except ValueError:
+            continue
+    
+    for key in old_jobs:
+        del job_history[key]
+    
+    if old_jobs:
+        save_job_history(job_history)
+        logger.info(f"Removed {len(old_jobs)} old jobs from history")
+
 def main():
     try:
         logger.info("Starting job scraping process...")
         
-        # Clean up old jobs from database
-        db.cleanup_old_jobs(days=30)
+        # Clean up old jobs from history
+        cleanup_old_jobs()
         
         # Clean up old CSV files
         cleanup_old_csvs()
