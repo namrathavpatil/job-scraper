@@ -1,49 +1,156 @@
-def send_csv_to_discord(csv_path):
-    """Send filtered job openings to Discord as a formatted message."""
-    try:
-        df = pd.read_csv(csv_path)
-        
-        # ✅ Convert date safely without using .dt later
-        if 'Date' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+import os
+import time
+import logging
+import json
+import re
+import requests
+import pandas as pd
+from datetime import datetime, timedelta
+from pathlib import Path
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
-        history = load_job_history()
-        new_jobs = []
-        for _, job in df.iterrows():
-            if is_new_job(job, history):
-                new_jobs.append(job)
-        save_job_history(history)
-        
-        if not new_jobs:
-            message = f"📊 **Job Update** ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
-            message += "No new job openings found for today from target companies.\n"
-            message += f"Total jobs checked: {len(df)}\n"
-            message += f"Jobs from target companies: {len(df[df['Company'].str.contains('|'.join(map(re.escape, TARGET_COMPANIES)), case=False, na=False)])}\n"
-            # ❌ Remove .dt accessor here
-        else:
-            message = f"🎯 **New Job Openings from Target Companies** ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
-            for job in new_jobs:
-                message += f"**Company:** {job['Company']}\n"
-                message += f"**Position:** {job['Position Title']}\n"
-                # ❌ Date removed
-                message += f"**Apply:** {job['Apply']}\n"
-                message += "-------------------\n\n"
-            message += f"\nTotal new jobs found: {len(new_jobs)}"
-        
-        logger.info(f"Sending the following message to Discord:\n{message}")
-        payload = {
-            "content": message,
-            "username": "Job Scraper Bot",
-            "avatar_url": "https://i.imgur.com/4M34hi2.png"
-        }
-        response = requests.post(WEBHOOK_URL, json=payload)
-        if response.status_code == 200:
-            logger.info("Successfully sent job openings to Discord")
-            return True
-        else:
-            logger.error(f"Failed to send to Discord. Status code: {response.status_code}")
-            logger.error(f"Response content: {response.text}")
-            return False
-    except Exception as e:
-        logger.error(f"Error sending to Discord: {e}")
-        return False
+# ---------- Setup ----------
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("JobScraper")
+
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+AIRTABLE_URL = os.getenv("AIRTABLE_URL")
+
+if not WEBHOOK_URL or not AIRTABLE_URL:
+    logger.error("Missing required environment variables: WEBHOOK_URL or AIRTABLE_URL")
+    exit(1)
+
+BASE_DIR = Path("job_data")
+CSV_DIR = BASE_DIR / "csv_files"
+HISTORY_FILE = BASE_DIR / "job_history.json"
+FILTERED_EXCEL = BASE_DIR / "filtered_jobs.xlsx"
+
+TARGET_COMPANIES = ["Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper","Mayo Clinic"]
+
+BASE_DIR.mkdir(parents=True, exist_ok=True)
+CSV_DIR.mkdir(parents=True, exist_ok=True)
+
+# ---------- Helper Functions ----------
+
+def load_history():
+    if HISTORY_FILE.exists():
+        with open(HISTORY_FILE, 'r') as f:
+            return json.load(f)
+    return {"seen_jobs": []}
+
+def save_history(history):
+    with open(HISTORY_FILE, 'w') as f:
+        json.dump(history, f)
+
+def is_new_job(job, history):
+    key = f"{job['Company']}_{job['Position Title']}"
+    if key not in history["seen_jobs"]:
+        history["seen_jobs"].append(key)
+        return True
+    return False
+
+def setup_driver():
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
+    prefs = {
+        "download.default_directory": str(CSV_DIR.resolve()),
+        "download.prompt_for_download": False
+    }
+    options.add_experimental_option("prefs", prefs)
+    service = Service("/usr/bin/chromedriver")
+    return webdriver.Chrome(service=service, options=options)
+
+def cleanup_old_csvs():
+    now = datetime.now()
+    for file in CSV_DIR.glob("*.csv"):
+        if now - datetime.fromtimestamp(file.stat().st_ctime) > timedelta(hours=1):
+            file.unlink()
+
+def download_csv(driver):
+    driver.get(AIRTABLE_URL)
+    time.sleep(5)
+    WebDriverWait(driver, 15).until(
+        EC.element_to_be_clickable((By.CLASS_NAME, "viewMenuButton"))
+    ).click()
+    time.sleep(1)
+    WebDriverWait(driver, 15).until(
+        EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-tutorial-selector-id='viewMenuItem-viewExportCsv']"))
+    ).click()
+    time.sleep(10)
+
+    files = list(CSV_DIR.glob("*.csv"))
+    if not files:
+        logger.error("No CSV downloaded.")
+        return None
+
+    latest = max(files, key=lambda f: f.stat().st_ctime)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    renamed = CSV_DIR / f"jobs_{timestamp}.csv"
+    latest.rename(renamed)
+    return renamed
+
+def filter_jobs(csv_path):
+    df = pd.read_csv(csv_path)
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df = df[df["Date"].notna()]
+    today = datetime.now().date()
+
+    mask = (
+        df["Company"].str.contains('|'.join(TARGET_COMPANIES), case=False, na=False)
+        & (df["Date"].dt.date == today)
+    )
+    filtered = df[mask]
+
+    if not filtered.empty:
+        filtered.to_csv(str(csv_path).replace(".csv", "_filtered.csv"), index=False)
+        filtered.to_excel(FILTERED_EXCEL, index=False)
+        return filtered
+
+    return pd.DataFrame()
+
+def send_to_discord(jobs_df):
+    history = load_history()
+    new_jobs = [job for _, job in jobs_df.iterrows() if is_new_job(job, history)]
+    save_history(history)
+
+    if not new_jobs:
+        logger.info("No new jobs found.")
+        return
+
+    message = "**🎯 New Job Openings from Target Companies**\n\n"
+    for job in new_jobs:
+        message += f"**Company:** {job['Company']}\n**Position:** {job['Position Title']}\n**Apply:** {job['Apply']}\n---\n"
+
+    requests.post(WEBHOOK_URL, json={"content": message})
+
+# ---------- Main ----------
+
+def main():
+    logger.info("🔍 Starting job scraper...")
+    cleanup_old_csvs()
+    driver = setup_driver()
+
+    try:
+        csv_path = download_csv(driver)
+    finally:
+        driver.quit()
+
+    if not csv_path:
+        return
+
+    filtered_df = filter_jobs(csv_path)
+    if not filtered_df.empty:
+        send_to_discord(filtered_df)
+
+    logger.info("✅ Job scraping finished.")
+
+if __name__ == "__main__":
+    main()
