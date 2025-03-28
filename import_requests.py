@@ -30,6 +30,13 @@ AIRTABLE_URL = os.getenv('AIRTABLE_URL')
 if not WEBHOOK_URL or not AIRTABLE_URL:
     logger.error("Missing required environment variables: WEBHOOK_URL or AIRTABLE_URL")
     sys.exit(1)
+    
+RESEARCH_WEBHOOK_URL = os.getenv('RESEARCH_WEBHOOK_URL')
+
+if not WEBHOOK_URL or not AIRTABLE_URL or not RESEARCH_WEBHOOK_URL:
+    logger.error("Missing required environment variables: WEBHOOK_URL, AIRTABLE_URL, or RESEARCH_WEBHOOK_URL")
+    sys.exit(1)
+
 
 # Set up directories (adjust as needed)
 BASE_DIR = os.path.join(os.getcwd(), "job_data")
@@ -122,73 +129,59 @@ def save_filtered_jobs_to_excel(df):
 import pytz  # Make sure this is at the top of your file
 
 def filter_jobs(csv_path):
-    """Filter jobs based on target companies and today's date in LA timezone, 
-    and include jobs with 'researcher' in position title."""
     try:
         df = pd.read_csv(csv_path)
-
-        logger.info("CSV Structure:")
-        logger.info(f"Columns: {list(df.columns)}")
-        logger.info(f"Number of rows: {len(df)}")
-        logger.info("\nSample of data:")
-        logger.info(df.head())
-
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        la_tz = pytz.timezone("America/Los_Angeles")
-        today = datetime.now(la_tz).date()
+        df = df[df['Date'].notna()]
+        df['OnlyDate'] = df['Date'].dt.normalize()
+        today = pd.Timestamp(datetime.now().date())
 
         company_pattern = '|'.join(map(re.escape, TARGET_COMPANIES))
 
-        # Target jobs from companies and posted today
-        company_filter = df[
+        company_df = df[
             (df['Company'].str.contains(company_pattern, case=False, na=False)) &
-            (df['Date'].dt.date == today)
+            (df['OnlyDate'] == today)
         ]
 
-        # 🔍 Also get jobs with "researcher" in title (case-insensitive), even if company not in list
-        researcher_jobs = df[
-            df['Position Title'].str.contains("researcher", case=False, na=False)
+        researcher_df = df[
+            df['Position Title'].str.contains('researcher', case=False, na=False)
         ]
 
-        # Combine both (avoid duplicates)
-        filtered_df = pd.concat([company_filter, researcher_jobs]).drop_duplicates()
+        logger.info(f"Target company jobs today: {len(company_df)}")
+        logger.info(f"'Researcher' jobs found: {len(researcher_df)}")
 
-        logger.info("\nFiltering Results:")
-        logger.info(f"Jobs from target companies today: {len(company_filter)}")
-        logger.info(f"Jobs with 'researcher' in title: {len(researcher_jobs)}")
-        logger.info(f"Final combined filtered jobs: {len(filtered_df)}")
+        # Save both CSVs
+        company_csv = csv_path.replace('.csv', '_filtered_companies.csv')
+        researcher_csv = csv_path.replace('.csv', '_filtered_researchers.csv')
+        company_df.to_csv(company_csv, index=False)
+        researcher_df.to_csv(researcher_csv, index=False)
 
-        if not filtered_df.empty:
-            logger.info("\nFiltered Jobs:")
-            logger.info(filtered_df[['Company', 'Position Title', 'Date']].to_string())
-            save_filtered_jobs_to_excel(filtered_df)
+        if not company_df.empty or not researcher_df.empty:
+            combined_df = pd.concat([company_df, researcher_df]).drop_duplicates()
+            save_filtered_jobs_to_excel(combined_df)
 
-        filtered_csv_path = csv_path.replace('.csv', '_filtered.csv')
-        filtered_df.to_csv(filtered_csv_path, index=False)
-        logger.info(f"Filtered jobs saved to: {filtered_csv_path}")
-
-        return filtered_csv_path if not filtered_df.empty else None
+        return company_csv if not company_df.empty else None, researcher_csv if not researcher_df.empty else None
 
     except Exception as e:
         logger.error(f"Error filtering jobs: {e}")
-        return None
+        return None, None
 
-def send_csv_to_discord(csv_path):
+
+def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
     try:
         df = pd.read_csv(csv_path)
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')  # Ensure datetime
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         history = load_job_history()
         new_jobs = [job for _, job in df.iterrows() if is_new_job(job, history)]
         save_job_history(history)
 
         if not new_jobs:
-            logger.info("No new job openings found for today from target companies or researcher titles.")
+            logger.info(f"No new {label.lower()} found.")
             return
 
         base_time = datetime.now().strftime('%Y-%m-%d %H:%M')
-        header = f"🎯 **New Job Openings** ({base_time})\n\n"
         messages = []
-        current_msg = header
+        current_msg = f"🎯 **{label}** ({base_time})\n\n"
 
         for job in new_jobs:
             job_text = (
@@ -197,7 +190,7 @@ def send_csv_to_discord(csv_path):
                 f"**Apply:** {job['Apply']}\n"
                 "-------------------\n\n"
             )
-            if len(current_msg) + len(job_text) > 1900:  # 1900 to leave room for formatting
+            if len(current_msg) + len(job_text) > 1900:
                 messages.append(current_msg)
                 current_msg = ""
             current_msg += job_text
@@ -211,18 +204,18 @@ def send_csv_to_discord(csv_path):
                 "username": "Job Scraper Bot",
                 "avatar_url": "https://i.imgur.com/4M34hi2.png"
             }
-            response = requests.post(WEBHOOK_URL, json=payload)
+            response = requests.post(webhook_url, json=payload)
             if response.status_code != 200:
-                logger.error(f"Failed to send part {idx + 1} to Discord. Status code: {response.status_code}")
+                logger.error(f"Failed to send part {idx + 1} to Discord (label: {label}). Status code: {response.status_code}")
                 logger.error(f"Response content: {response.text}")
                 return False
-            time.sleep(1)  # small delay to avoid rate limits
+            time.sleep(1)
 
-        logger.info(f"Successfully sent {len(messages)} message(s) to Discord.")
+        logger.info(f"Successfully sent {label.lower()} to Discord.")
         return True
 
     except Exception as e:
-        logger.error(f"Error sending to Discord: {e}")
+        logger.error(f"Error sending {label.lower()} to Discord: {e}")
         return False
 
 
@@ -269,15 +262,16 @@ def main():
             logger.error("No CSV file found after download; aborting.")
             return
 
-        filtered_csv_path = filter_jobs(csv_path)
-        if not filtered_csv_path:
-            logger.error("Filtering failed; aborting.")
+        company_csv, researcher_csv = filter_jobs(csv_path)
+        if not company_csv and not researcher_csv:
+            logger.error("No relevant jobs found; aborting.")
             return
 
-        if send_csv_to_discord(filtered_csv_path):
-            logger.info("Notification sent successfully")
-        else:
-            logger.error("Failed to send notification to Discord")
+        if company_csv:
+            send_csv_to_discord(company_csv, WEBHOOK_URL, label="Target Company Jobs")
+
+        if researcher_csv:
+            send_csv_to_discord(researcher_csv, RESEARCH_WEBHOOK_URL, label="Researcher Jobs")
 
         try:
             os.remove(csv_path)
@@ -289,6 +283,7 @@ def main():
     except Exception as e:
         logger.error(f"Error in main execution: {e}")
         raise
+
 
 if __name__ == "__main__":
     main()
