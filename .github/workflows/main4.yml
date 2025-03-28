@@ -5,10 +5,8 @@ on:
     - cron: '0 * * * *'  # Runs every hour
   workflow_dispatch:  # Allows manual trigger
 
-# Add permissions block
 permissions:
-  contents: write  # Changed from read to write to allow pushing changes
-  #artifacts: write
+  contents: write  # Needed to push updates to job_history.json
 
 jobs:
   scrape:
@@ -16,45 +14,38 @@ jobs:
     
     steps:
     - uses: actions/checkout@v3
-    
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.12'
-    
+
     - name: Install Chrome
       run: |
-        # Download Google's Linux signing key and add it to a keyring file
         curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor | sudo tee /usr/share/keyrings/google-linux-signing-key.gpg > /dev/null
-        # Add the Chrome repository with the signed-by option
         echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing-key.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
         sudo apt-get update
         sudo apt-get install -y google-chrome-stable
-    
+
     - name: Install ChromeDriver
       run: |
-        # Debug: print Chrome version output
         echo "Running: google-chrome-stable --version"
         google-chrome-stable --version
-        
-        # Use the matching ChromeDriver version
         CHROMEDRIVER_VERSION="134.0.6998.165"
         echo "Using ChromeDriver version: $CHROMEDRIVER_VERSION"
-        
-        # Download ChromeDriver
         wget -q "https://storage.googleapis.com/chrome-for-testing-public/$CHROMEDRIVER_VERSION/linux64/chromedriver-linux64.zip"
         unzip chromedriver-linux64.zip
         chmod +x chromedriver-linux64/chromedriver
         sudo mv chromedriver-linux64/chromedriver /usr/local/bin/
-    
-    - name: Install dependencies
+
+    - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-    
+
     - name: Create job data directory
       run: mkdir -p job_data
-    
+
     - name: Run job scraper
       env:
         WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
@@ -62,14 +53,14 @@ jobs:
         RESEARCH_WEBHOOK_URL: ${{ secrets.RESEARCH_WEBHOOK_URL }}
         UNIVERSITY_WEBHOOK_URL: ${{ secrets.UNIVERSITY_WEBHOOK_URL }}
       run: python import_requests.py
-    
+
     - name: Upload job history artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: job-history
         path: job_data/job_history.json
-        retention-days: 30  # Keep the history for 30 days
-    
+        retention-days: 30
+
     - name: Commit updated job history
       run: |
         git config --global user.name "github-actions"
@@ -77,4 +68,3 @@ jobs:
         git add job_data/job_history.json
         git commit -m "Update job history" || echo "No changes to commit"
         git push
-        
