@@ -8,7 +8,7 @@ on:
 # Add permissions block
 permissions:
   contents: write  # Changed from read to write to allow pushing changes
-  artifacts: write
+  #artifacts: write
 
 jobs:
   scrape:
