@@ -2,55 +2,43 @@ name: Job Scraper
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Runs every hour
-  workflow_dispatch:  # Allows manual trigger
+    - cron: '0 */4 * * *'  # Run every 4 hours
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v2
-      
-      - name: Set up Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: '3.12'
-      
-      - name: Install Chrome
-        run: |
-          # Download Google's Linux signing key and add it to a keyring file
-          curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor | sudo tee /usr/share/keyrings/google-linux-signing-key.gpg > /dev/null
-          # Add the Chrome repository with the signed-by option
-          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing-key.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
-      
-      - name: Install ChromeDriver
-        run: |
-          # Debug: print Chrome version output
-          echo "Running: google-chrome-stable --version"
-          google-chrome-stable --version
-          
-          # Use the matching ChromeDriver version
-          CHROMEDRIVER_VERSION="134.0.6998.165"
-          echo "Using ChromeDriver version: $CHROMEDRIVER_VERSION"
-          
-          # Download ChromeDriver
-          wget -q "https://storage.googleapis.com/chrome-for-testing-public/$CHROMEDRIVER_VERSION/linux64/chromedriver-linux64.zip"
-          unzip chromedriver-linux64.zip
-          chmod +x chromedriver-linux64/chromedriver
-          sudo mv chromedriver-linux64/chromedriver /usr/local/bin/
-
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      
-      - name: Run job scraper
-        env:
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-          AIRTABLE_URL: ${{ secrets.AIRTABLE_URL }}
-          RESEARCH_WEBHOOK_URL: ${{ secrets.RESEARCH_WEBHOOK_URL}}
-          UNIVERSITY_WEBHOOK_URL: ${{secrets.UNIVERSITY_WEBHOOK_URL}}
-        run: python import_requests.py
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Download job history artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: job-history
+        path: ./
+        if-no-files-found: ignore
+    
+    - name: Run job scraper
+      env:
+        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        AIRTABLE_URL: ${{ secrets.AIRTABLE_URL }}
+        RESEARCH_WEBHOOK_URL: ${{ secrets.RESEARCH_WEBHOOK_URL }}
+        UNIVERSITY_WEBHOOK_URL: ${{ secrets.UNIVERSITY_WEBHOOK_URL }}
+      run: python import_requests.py
+    
+    - name: Upload job history artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: job-history
+        path: job_history.json
+        retention-days: 30  # Keep the artifact for 30 days
