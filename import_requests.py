@@ -26,18 +26,13 @@ logger = logging.getLogger(__name__)
 # Configuration from environment variables
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 AIRTABLE_URL = os.getenv('AIRTABLE_URL')
+RESEARCH_WEBHOOK_URL = os.getenv('RESEARCH_WEBHOOK_URL')
+UNIVERSITY_WEBHOOK_URL = os.getenv('UNIVERSITY_WEBHOOK_URL')
 
-if not WEBHOOK_URL or not AIRTABLE_URL:
-    logger.error("Missing required environment variables: WEBHOOK_URL or AIRTABLE_URL")
+if not WEBHOOK_URL or not AIRTABLE_URL or not RESEARCH_WEBHOOK_URL or not UNIVERSITY_WEBHOOK_URL:
+    logger.error("Missing required environment variables: WEBHOOK_URL, AIRTABLE_URL, RESEARCH_WEBHOOK_URL, or UNIVERSITY_WEBHOOK_URL")
     sys.exit(1)
     
-RESEARCH_WEBHOOK_URL = os.getenv('RESEARCH_WEBHOOK_URL')
-
-if not WEBHOOK_URL or not AIRTABLE_URL or not RESEARCH_WEBHOOK_URL:
-    logger.error("Missing required environment variables: WEBHOOK_URL, AIRTABLE_URL, or RESEARCH_WEBHOOK_URL")
-    sys.exit(1)
-
-
 # Set up directories (adjust as needed)
 BASE_DIR = os.path.join(os.getcwd(), "job_data")
 CSV_DIR = os.path.join(BASE_DIR, "csv_files")
@@ -194,50 +189,61 @@ def filter_jobs(csv_path):
         # Compile regex pattern for target companies
         company_pattern = '|'.join(map(re.escape, TARGET_COMPANIES))
 
-        # Filter for target companies with postings today
+        # Filter jobs for target companies posted today
         company_df = df[
             df['Company'].str.contains(company_pattern, case=False, na=False) &
             (df['OnlyDate'] == today)
         ]
 
-        # Filter for positions containing 'researcher'
+        # Filter researcher jobs
         researcher_df = df[
             df['Position Title'].str.contains('researcher', case=False, na=False)
         ]
 
-        # Filter for companies with 'university' in their name
+        # Filter university jobs
         university_df = df[
             df['Company'].str.contains('university', case=False, na=False)
         ]
 
-        # Combine researcher and university DataFrames, removing duplicates
-        researcher_combined_df = pd.concat([researcher_df, university_df]).drop_duplicates()
+        # Exclude university jobs from researcher_df
+        non_university_researcher_df = researcher_df[
+            ~researcher_df['Company'].str.contains('university', case=False, na=False)
+        ]
 
-        # Log the number of jobs found
+        researcher_combined_df = non_university_researcher_df
+
         logger.info(f"Target company jobs today: {len(company_df)}")
         logger.info(f"'Researcher' jobs found: {len(researcher_df)}")
+        logger.info(f"'Researcher' jobs (non-university): {len(researcher_combined_df)}")
         logger.info(f"University jobs found: {len(university_df)}")
 
-        # Save the filtered DataFrames to CSV files
+        # Prepare output CSV paths
         company_csv = csv_path.replace('.csv', '_filtered_companies.csv')
         researcher_csv = csv_path.replace('.csv', '_filtered_researchers.csv')
+        university_csv = csv_path.replace('.csv', '_filtered_universities.csv')
 
+        # Save CSVs
         if not company_df.empty:
             company_df.to_csv(company_csv, index=False)
-
         if not researcher_combined_df.empty:
             researcher_combined_df.to_csv(researcher_csv, index=False)
+        if not university_df.empty:
+            university_df.to_csv(university_csv, index=False)
 
-        # Combine all filtered DataFrames for Excel export
-        combined_df = pd.concat([company_df, researcher_combined_df]).drop_duplicates()
+        # Save combined Excel
+        combined_df = pd.concat([company_df, researcher_combined_df, university_df]).drop_duplicates()
         if not combined_df.empty:
             save_filtered_jobs_to_excel(combined_df)
 
-        return company_csv if not company_df.empty else None, researcher_csv if not researcher_combined_df.empty else None
+        return (
+            company_csv if not company_df.empty else None,
+            researcher_csv if not researcher_combined_df.empty else None,
+            university_csv if not university_df.empty else None
+        )
 
     except Exception as e:
         logger.error(f"Error filtering jobs: {e}")
-        return None, None
+        return None, None, None
 
 def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
     try:
@@ -365,8 +371,9 @@ def main():
             logger.error("No CSV file found after download; aborting.")
             return
 
-        company_csv, researcher_csv = filter_jobs(csv_path)
-        if not company_csv and not researcher_csv:
+        company_csv, researcher_csv, university_csv = filter_jobs(csv_path)
+
+        if not company_csv and not researcher_csv and not university_csv:
             logger.error("No relevant jobs found; aborting.")
             return
 
@@ -375,6 +382,9 @@ def main():
 
         if researcher_csv:
             send_csv_to_discord(researcher_csv, RESEARCH_WEBHOOK_URL, label="Researcher Jobs")
+
+        if university_csv:
+            send_csv_to_discord(university_csv, UNIVERSITY_WEBHOOK_URL, label="University Jobs")
 
         try:
             os.remove(csv_path)
