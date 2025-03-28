@@ -234,6 +234,17 @@ def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
                 if pd.notna(job.get('Apply')):
                     message += f"Apply: {job['Apply']}\n"
                 message += "\n"
+                
+                # Save job to MongoDB
+                job_data = {
+                    "company": job['Company'],
+                    "position_title": job['Position Title'],
+                    "apply_url": job.get('Apply'),
+                    "date_posted": job.get('Date'),
+                    "date_seen": datetime.utcnow(),
+                    "category": label  # Add category to track which type of job it is
+                }
+                db.jobs.insert_one(job_data)
             
             # Send to Discord
             payload = {"content": message}
@@ -244,14 +255,10 @@ def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
             else:
                 logger.error(f"Failed to send to Discord: {response.status_code} - {response.text}")
             
-            # Mark jobs as seen in database
-            for _, job in chunk.iterrows():
-                mark_job_seen(job)
-            
             # Add delay between chunks
             time.sleep(1)
         
-        logger.info(f"Successfully sent all {label} to Discord and updated database")
+        logger.info(f"Successfully sent all {label} to Discord and saved to database")
         
     except Exception as e:
         logger.error(f"Error sending to Discord: {e}")
