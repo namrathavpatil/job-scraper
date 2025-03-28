@@ -36,49 +36,13 @@ if not WEBHOOK_URL or not AIRTABLE_URL or not RESEARCH_WEBHOOK_URL or not UNIVER
 # Set up directories (adjust as needed)
 BASE_DIR = os.path.join(os.getcwd(), "job_data")
 CSV_DIR = os.path.join(BASE_DIR, "csv_files")
+HISTORY_FILE = os.path.join(BASE_DIR, "job_history.json")
 FILTERED_EXCEL = os.path.join(BASE_DIR, "filtered_jobs.xlsx")
-HISTORY_FILE = os.path.join(BASE_DIR, 'job_history.json')
+LOGGED_JOBS_FILE = os.path.join(BASE_DIR, "jobs_sent_to_discord.txt")
 
 # Create directories if they don't exist
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(CSV_DIR, exist_ok=True)
-
-# Load job history from file
-def load_job_history():
-    try:
-        if os.path.exists(HISTORY_FILE):
-            with open(HISTORY_FILE, 'r') as f:
-                data = json.load(f)
-                logger.info(f"Loaded {len(data)} previously seen jobs from history")
-                return data
-        logger.info("No job history found, starting fresh")
-        return {}
-    except Exception as e:
-        logger.error(f"Error loading job history: {e}")
-        return {}
-
-def save_job_history(history):
-    try:
-        with open(HISTORY_FILE, 'w') as f:
-            json.dump(history, f, indent=2)
-        logger.info(f"Saved {len(history)} jobs to history")
-        
-        # If running in GitHub Actions, commit the changes
-        if os.getenv('GITHUB_ACTIONS'):
-            try:
-                os.system('git config --global user.name "github-actions"')
-                os.system('git config --global user.email "actions@github.com"')
-                os.system(f'git add {HISTORY_FILE}')
-                os.system('git commit -m "Update job history" || echo "No changes to commit"')
-                os.system('git push')
-                logger.info("Committed job history changes to repository")
-            except Exception as e:
-                logger.error(f"Error committing job history: {e}")
-    except Exception as e:
-        logger.error(f"Error saving job history: {e}")
-
-# Load initial job history
-job_history = load_job_history()
 
 # Target companies to filter for (including TikTok)
 TARGET_COMPANIES = [
@@ -121,19 +85,51 @@ TARGET_COMPANIES = [
     "Chevron Corporation", "Cigna", "Ford Motor Company", "Bank of America", "General Motors", "Elevance Health"
 ]
 
-# ---------------- Helper Functions ----------------
+def load_job_history():
+    try:
+        if os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, 'r') as f:
+                data = json.load(f)
+                # Convert list to set if it exists, otherwise create empty set
+                data["seen_jobs"] = set(data.get("seen_jobs", []))
+                logger.info(f"Loaded {len(data['seen_jobs'])} previously seen jobs from history")
+                return data
+        logger.info("No job history found, starting fresh")
+        return {"seen_jobs": set()}
+    except Exception as e:
+        logger.error(f"Error loading job history: {e}")
+        return {"seen_jobs": set()}
 
-def is_new_job(job):
-    """Check if a job is new using file history."""
-    key = f"{job['Company']} - {job['Position Title']}"
-    return key not in job_history
+def save_job_history(history):
+    try:
+        # Convert set to list before saving
+        history["seen_jobs"] = list(history.get("seen_jobs", set()))
+        with open(HISTORY_FILE, 'w') as f:
+            json.dump(history, f)
+        logger.info(f"Saved {len(history['seen_jobs'])} jobs to history")
+        
+        # If running in GitHub Actions, commit the changes
+        if os.getenv('GITHUB_ACTIONS'):
+            try:
+                os.system('git config --global user.name "github-actions"')
+                os.system('git config --global user.email "actions@github.com"')
+                os.system(f'git add {HISTORY_FILE}')
+                os.system('git commit -m "Update job history" || echo "No changes to commit"')
+                os.system('git push')
+                logger.info("Committed job history changes to repository")
+            except Exception as e:
+                logger.error(f"Error committing job history: {e}")
+    except Exception as e:
+        logger.error(f"Error saving job history: {e}")
 
-def mark_job_seen(job):
-    """Mark a job as seen in file history."""
-    key = f"{job['Company']} - {job['Position Title']}"
-    job_history[key] = str(datetime.utcnow())
-    save_job_history(job_history)
-    return True
+def is_new_job(job, history):
+    job_key = f"{job['Company']}_{job['Position Title']}"
+    if job_key not in history["seen_jobs"]:
+        history["seen_jobs"].add(job_key)
+        logger.info(f"Found new job: {job['Company']} - {job['Position Title']}")
+        return True
+    logger.debug(f"Skipping already seen job: {job['Company']} - {job['Position Title']}")
+    return False
 
 def setup_driver():
     chrome_options = Options()
@@ -156,6 +152,140 @@ def setup_driver():
     chrome_options.add_argument("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
     service = Service('/usr/bin/chromedriver')
     return webdriver.Chrome(service=service, options=chrome_options)
+
+def download_airtable_csv(driver):
+    try:
+        driver.get(AIRTABLE_URL)
+        logger.info("Navigated to Airtable URL")
+        time.sleep(5)
+        wait = WebDriverWait(driver, 10)
+        wait.until(EC.element_to_be_clickable((By.CLASS_NAME, "viewMenuButton"))).click()
+        logger.info("Clicked view menu button")
+        time.sleep(1)
+        wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-tutorial-selector-id='viewMenuItem-viewExportCsv']"))).click()
+        logger.info("Clicked Download CSV option")
+        time.sleep(10)
+
+        downloaded_files = [f for f in os.listdir(CSV_DIR) if f.endswith('.csv')]
+        if not downloaded_files:
+            logger.error("No CSV file found in downloads")
+            return None
+
+        latest_csv = max(downloaded_files, key=lambda x: os.path.getctime(os.path.join(CSV_DIR, x)))
+        csv_path = os.path.join(CSV_DIR, latest_csv)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        new_path = os.path.join(CSV_DIR, f"jobs_{timestamp}.csv")
+        os.rename(csv_path, new_path)
+        logger.info(f"Saved CSV to: {new_path}")
+        return new_path
+    except Exception as e:
+        logger.error(f"Error downloading CSV: {e}")
+        return None
+
+def log_sent_jobs(jobs):
+    try:
+        os.makedirs(BASE_DIR, exist_ok=True)  # Make sure the folder exists
+        if not os.path.exists(LOGGED_JOBS_FILE):
+            with open(LOGGED_JOBS_FILE, "w") as f:
+                f.write("Position Title | Company | Date\n")  # Header for first-time file
+
+        with open(LOGGED_JOBS_FILE, "a") as f:
+            for job in jobs:
+                date_str = pd.to_datetime(job['Date'], errors='coerce')
+                if pd.isna(date_str):
+                    date_str = "Unknown"
+                else:
+                    date_str = date_str.strftime('%Y-%m-%d')
+                f.write(f"{job['Position Title']} | {job['Company']} | {date_str}\n")
+    except Exception as e:
+        logger.error(f"Error logging sent jobs: {e}")
+
+def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
+    try:
+        if not webhook_url:
+            logger.error(f"Webhook URL is empty for {label}")
+            return False
+
+        if not webhook_url.startswith('http'):
+            logger.error(f"Invalid webhook URL format for {label}")
+            return False
+
+        # Load job history at the start
+        history = load_job_history()
+        logger.info(f"Checking {label} against {len(history['seen_jobs'])} previously seen jobs")
+
+        df = pd.read_csv(csv_path)
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        
+        # Filter for new jobs
+        new_jobs = [job for _, job in df.iterrows() if is_new_job(job, history)]
+        
+        if not new_jobs:
+            logger.info(f"No new {label.lower()} found.")
+            return True
+
+        logger.info(f"Found {len(new_jobs)} new {label.lower()} to send to Discord")
+
+        base_time = datetime.now().strftime('%Y-%m-%d %H:%M')
+        messages = []
+        current_msg = f"🎯 **{label}** ({base_time})\n\n"
+
+        for job in new_jobs:
+            job_text = (
+                f"**Company:** {job['Company']}\n"
+                f"**Position:** {job['Position Title']}\n"
+                f"**Apply:** {job['Apply']}\n"
+                "-------------------\n\n"
+            )
+            if len(current_msg) + len(job_text) > 1900:
+                messages.append(current_msg)
+                current_msg = ""
+            current_msg += job_text
+
+        if current_msg:
+            messages.append(current_msg)
+
+        success = True
+        for idx, msg in enumerate(messages):
+            payload = {
+                "content": msg,
+                "username": "Job Scraper Bot",
+                "avatar_url": "https://i.imgur.com/4M34hi2.png"
+            }
+            response = requests.post(webhook_url, json=payload)
+
+            if response.status_code in [200, 204]:  # Both are success codes
+                logger.info(f"Successfully sent part {idx + 1} to Discord (label: {label})")
+            else:
+                logger.error(f"Failed to send part {idx + 1} to Discord (label: {label}). Status code: {response.status_code}")
+                logger.error(f"Response content: {response.text}")
+                success = False
+
+            time.sleep(1)
+
+        if success:
+            try:
+                # Save to job history
+                logger.info(f"Saving {len(new_jobs)} new jobs to history file")
+                save_job_history(history)
+                
+                # Log sent jobs to text file
+                logger.info(f"Logging {len(new_jobs)} sent jobs to {LOGGED_JOBS_FILE}")
+                log_sent_jobs(new_jobs)
+                
+                logger.info(f"Successfully sent all {label.lower()} to Discord and updated both history files")
+            except Exception as e:
+                logger.error(f"Error saving job history or logging sent jobs: {e}")
+                # Don't return False here as the Discord messages were sent successfully
+        else:
+            logger.error(f"Failed to send all {label.lower()} to Discord, not updating history")
+            return False
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Error sending {label.lower()} to Discord: {e}")
+        return False
 
 def cleanup_old_csvs():
     current_time = datetime.now()
@@ -240,154 +370,42 @@ def filter_jobs(csv_path):
         logger.error(f"Error filtering jobs: {e}")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
-    try:
-        # Read the CSV file
-        df = pd.read_csv(csv_path)
-        
-        # Filter for new jobs only
-        new_jobs = df[df.apply(is_new_job, axis=1)]
-        
-        if new_jobs.empty:
-            logger.info(f"No new {label} to send to Discord")
-            return
-        
-        logger.info(f"Found {len(new_jobs)} new {label} to send to Discord")
-        
-        # Split into chunks of 10 jobs
-        chunk_size = 10
-        for i in range(0, len(new_jobs), chunk_size):
-            chunk = new_jobs.iloc[i:i + chunk_size]
-            
-            # Create message content
-            message = f"**{label}**\n\n"
-            for _, job in chunk.iterrows():
-                message += f"**{job['Position Title']}** at **{job['Company']}**\n"
-                message += f"Posted: {job['Date']}\n"
-                if pd.notna(job.get('Apply')):
-                    message += f"Apply: {job['Apply']}\n"
-                message += "\n"
-                
-                # Mark job as seen
-                mark_job_seen(job)
-            
-            # Send to Discord
-            payload = {"content": message}
-            response = requests.post(webhook_url, json=payload)
-            
-            if response.status_code == 204:
-                logger.info(f"Successfully sent part {i//chunk_size + 1} to Discord (label: {label})")
-            else:
-                logger.error(f"Failed to send to Discord: {response.status_code} - {response.text}")
-            
-            # Add delay between chunks
-            time.sleep(1)
-        
-        logger.info(f"Successfully sent all {label} to Discord")
-        
-    except Exception as e:
-        logger.error(f"Error sending to Discord: {e}")
-
-def download_airtable_csv(driver):
-    try:
-        # Navigate to the Airtable URL
-        driver.get(AIRTABLE_URL)
-        logger.info("Navigated to Airtable URL")
-        
-        # Wait for and click the view menu button
-        view_menu = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label='View menu']"))
-        )
-        view_menu.click()
-        logger.info("Clicked view menu button")
-        
-        # Wait for and click the Download CSV option
-        download_csv = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, "//span[text()='Download CSV']"))
-        )
-        download_csv.click()
-        logger.info("Clicked Download CSV option")
-        
-        # Wait for download to complete
-        time.sleep(5)
-        
-        # Find the downloaded CSV file
-        csv_files = [f for f in os.listdir(CSV_DIR) if f.endswith('.csv')]
-        if not csv_files:
-            raise Exception("No CSV file found after download")
-        
-        latest_csv = max(csv_files, key=lambda x: os.path.getctime(os.path.join(CSV_DIR, x)))
-        csv_path = os.path.join(CSV_DIR, latest_csv)
-        
-        logger.info(f"Saved CSV to: {csv_path}")
-        return csv_path
-        
-    except Exception as e:
-        logger.error(f"Error downloading CSV: {e}")
-        raise
-
-def cleanup_old_jobs():
-    """Remove jobs older than 30 days from history."""
-    current_time = datetime.utcnow()
-    old_jobs = []
-    
-    for key, date_str in job_history.items():
-        try:
-            job_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-            if (current_time - job_date).days > 30:
-                old_jobs.append(key)
-        except ValueError:
-            continue
-    
-    for key in old_jobs:
-        del job_history[key]
-    
-    if old_jobs:
-        save_job_history(job_history)
-        logger.info(f"Removed {len(old_jobs)} old jobs from history")
-
 def main():
     try:
         logger.info("Starting job scraping process...")
-        
-        # Clean up old jobs from history
-        cleanup_old_jobs()
-        
-        # Clean up old CSV files
         cleanup_old_csvs()
-        
-        # Set up and start the driver
         driver = setup_driver()
-        
+        csv_path = download_airtable_csv(driver)
+        driver.quit()
+
+        if not csv_path:
+            logger.error("No CSV file found after download; aborting.")
+            return
+
+        company_csv, researcher_csv, university_csv = filter_jobs(csv_path)
+
+        if not company_csv and not researcher_csv and not university_csv:
+            logger.error("No relevant jobs found; aborting.")
+            return
+
+        if company_csv:
+            send_csv_to_discord(company_csv, WEBHOOK_URL, label="Target Company Jobs")
+
+        if researcher_csv:
+            send_csv_to_discord(researcher_csv, RESEARCH_WEBHOOK_URL, label="Researcher Jobs")
+
+        if university_csv:
+            send_csv_to_discord(university_csv, UNIVERSITY_WEBHOOK_URL, label="University Jobs")
+
         try:
-            # Download the CSV file
-            csv_path = download_airtable_csv(driver)
-            
-            # Filter jobs
-            company_df, researcher_df, university_df = filter_jobs(csv_path)
-            
-            # Send filtered jobs to Discord
-            if not company_df.empty:
-                send_csv_to_discord(csv_path, WEBHOOK_URL, "Target Company Jobs")
-            
-            if not researcher_df.empty:
-                send_csv_to_discord(csv_path, RESEARCH_WEBHOOK_URL, "Researcher Jobs")
-            
-            if not university_df.empty:
-                send_csv_to_discord(csv_path, UNIVERSITY_WEBHOOK_URL, "University Jobs")
-            
-            # Remove the downloaded CSV file
             os.remove(csv_path)
             logger.info("Removed downloaded CSV file after processing.")
-            
-        finally:
-            # Always quit the driver
-            driver.quit()
-        
+        except Exception as e:
+            logger.error(f"Error removing CSV file: {e}")
+
         logger.info("Job scraping process completed")
-        
     except Exception as e:
-        logger.error(f"Error in main process: {e}")
+        logger.error(f"Error in main execution: {e}")
         raise
 
 if __name__ == "__main__":
