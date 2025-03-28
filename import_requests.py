@@ -384,18 +384,19 @@ def main():
 
         company_csv, researcher_csv, university_csv = filter_jobs(csv_path)
 
+        # Correctly check if all DataFrames are empty
         if company_csv.empty and researcher_csv.empty and university_csv.empty:
             logger.error("No relevant jobs found; aborting.")
             return
 
-
-        if company_csv:
+        # Send to appropriate Discord webhooks only if DataFrame is NOT empty
+        if not company_csv.empty:
             send_csv_to_discord(company_csv, WEBHOOK_URL, label="Target Company Jobs")
 
-        if researcher_csv:
+        if not researcher_csv.empty:
             send_csv_to_discord(researcher_csv, RESEARCH_WEBHOOK_URL, label="Researcher Jobs")
 
-        if university_csv:
+        if not university_csv.empty:
             send_csv_to_discord(university_csv, UNIVERSITY_WEBHOOK_URL, label="University Jobs")
 
         try:
@@ -408,6 +409,7 @@ def main():
     except Exception as e:
         logger.error(f"Error in main execution: {e}")
         raise
+
 
 if __name__ == "__main__":
     main()
