@@ -39,6 +39,7 @@ CSV_DIR = os.path.join(BASE_DIR, "csv_files")
 HISTORY_FILE = os.path.join(BASE_DIR, "job_history.json")
 FILTERED_EXCEL = os.path.join(BASE_DIR, "filtered_jobs.xlsx")
 
+# Create directories if they don't exist
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(CSV_DIR, exist_ok=True)
 
@@ -109,6 +110,13 @@ def save_job_history(history):
         with open(HISTORY_FILE, 'w') as f:
             json.dump(history, f)
         logger.info(f"Saved {len(history['seen_jobs'])} jobs to history")
+        
+        # If running in GitHub Actions, save as artifact
+        if os.getenv('GITHUB_ACTIONS'):
+            artifact_path = os.path.join(os.getcwd(), "job_history.json")
+            with open(artifact_path, 'w') as f:
+                json.dump(history, f)
+            logger.info(f"Saved job history to artifact path: {artifact_path}")
     except Exception as e:
         logger.error(f"Error saving job history: {e}")
 
@@ -362,6 +370,20 @@ def download_airtable_csv(driver):
 def main():
     try:
         logger.info("Starting job scraping process...")
+        
+        # If running in GitHub Actions, try to load history from artifacts
+        if os.getenv('GITHUB_ACTIONS'):
+            artifact_path = os.path.join(os.getcwd(), "job_history.json")
+            if os.path.exists(artifact_path):
+                try:
+                    with open(artifact_path, 'r') as f:
+                        data = json.load(f)
+                        with open(HISTORY_FILE, 'w') as f2:
+                            json.dump(data, f2)
+                    logger.info("Loaded job history from GitHub Actions artifacts")
+                except Exception as e:
+                    logger.error(f"Error loading history from artifacts: {e}")
+        
         cleanup_old_csvs()
         driver = setup_driver()
         csv_path = download_airtable_csv(driver)
