@@ -45,7 +45,45 @@ os.makedirs(CSV_DIR, exist_ok=True)
 
 # Target companies to filter for (including TikTok)
 
-TARGET_COMPANIES = ["Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper", "Yahoo", "Tesla", "Nvidia", "Hyundai", "Deloitte", "PwC", "EY", "KPMG", "Goldman Sachs", "The Walt Disney Company", "Wells Fargo", "McKinsey & Company", "Riot Games", "Tinder", "DISQO", "GumGum", "MySpace", "Telesign", "PeerStreet", "Escape Communications", "Push Media", "Quantum Dimension", "Robin Labs", "Southbay", "The White Rabbit Entertainment", "Rubicon Project", "TaskUs", "AssetAvenue", "Clutter"]
+TARGET_COMPANIES = [
+    "Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper", "Yahoo", "Tesla", "Nvidia",
+    "Hyundai", "Deloitte", "PwC", "EY", "KPMG", "Goldman Sachs", "The Walt Disney Company", "Wells Fargo",
+    "McKinsey & Company", "Riot Games", "Tinder", "DISQO", "GumGum", "MySpace", "Telesign", "PeerStreet",
+    "Escape Communications", "Push Media", "Quantum Dimension", "Robin Labs", "Southbay", "The White Rabbit Entertainment",
+    "Rubicon Project", "TaskUs", "AssetAvenue", "Clutter", "Intel", "Samsung", "Qualcomm", "AMD", "LiveRamp",
+    "Red Hat", "Ciena", "Acadaca", "TP-Link", "CoBank", "Intermountain Health", "Hexagon Manufacturing Intelligence",
+    "North Carolina State University", "ProbablyMonsters", "Western Digital", "Boise State University", "TabaPay",
+    "The New York Times", "Wolters Kluwer", "Siemens Healthineers", "Cboe Global Markets", "Exelon", "Medtronic",
+    "Collins Aerospace", "General Dynamics Information Technology", "General Atomics", "Walgreens", "Delmarva Power",
+    "CGI", "Midland Credit Management", "Fiserv", "Capital One", "Teledyne Technologies Incorporated", "ByteDance",
+    "Haas Automation, Inc.", "SpaceX", "Tatari", "Aspen Technology", "Vertafore", "Mission Technologies",
+    "Palantir Technologies", "Adobe", "Medpace", "Mastercard", "Rambus", "The Reynolds and Reynolds Company",
+    "Boeing", "Analog Devices", "Northrop Grumman", "Patterson Companies, Inc.", "Piper Companies", "Aperia Technologies",
+    "Galaxy", "Costco Wholesale", "Texas A&M Engineering Experiment Station (TEES)", "Moffatt & Nichol", "Quick Quack Car Wash",
+    "KLA", "Lockheed Martin", "University of Maryland Medical System", "Belvedere Trading, LLC", "Casey's",
+    "The University of Texas at Austin", "Daimler Truck North America", "Texas A&M University", "Coalition, Inc.",
+    "Delta Solutions and Strategies", "Ennoble First Inc.", "FloQast", "Spring Health", "American Family Insurance",
+    "Resideo", "Freddie Mac", "NetSuite", "Virginia Commonwealth University", "AMEWAS, Inc.", "Esri", "Stanford Health Care",
+    "Prime Healthcare", "Leonardo DRS", "Wizards of the Coast", "Ancestry", "General Atomics Aeronautical Systems",
+    "Federal Signal Corporation", "Afficiency", "Amazon Web Services (AWS)", "BlackRock", "AppLovin", "Sinch",
+    "Catalent Pharma Solutions", "Splunk", "Field Agent", "Kensho Technologies", "Parsons Corporation", "Nature's Bakery",
+    "Neuralink", "AIG", "Atlassian", "Odoo", "Ascend Analytics", "Sandia National Laboratories", "Blue Origin",
+    "Corpay", "Madiba, Inc.", "TraceGains", "Abbott", "American Electric Power", "Moveworks", "Cognizant", "University of Virginia",
+    "California Highway Patrol", "University of Southern California", "Nidec Motor Corporation", "Austin Community College",
+    "Diversified Services Network, Inc.", "Plexus Corp.", "State of Nebraska", "Experian", "Infinite Campus", "Affirm",
+    "Addepar", "HSA Bank", "Perdue Farms", "CodePath", "Twitch", "Rockstar Games", "HashiCorp", "Peraton", "SquareTrade",
+    "Nintendo", "WOOD Consulting Services, Inc.", "Trillium Health Resources", "Target", "Sierra Nevada Corporation",
+    "Bectran, Inc.", "Walmart", "DoorDash", "eBay", "Airbnb", "Chewy", "Wayfair", "Expedia Group", "Booking Holdings",
+    "Coupang", "Uber Technologies", "Concentrix", "Science Applications International", "Insight Enterprises",
+    "Booz Allen Hamilton Holding", "DXC Technology", "Leidos Holdings", "Kyndryl Holdings", "Cognizant Technology Solutions",
+    "CDW", "IBM", "Motorola Solutions", "Amphenol", "Cisco Systems", "ON Semiconductor", "Microchip Technology",
+    "Sanmina", "KLA", "Lam Research", "Texas Instruments", "Applied Materials", "Micron Technology", "Jabil", "Broadcom",
+    "Advanced Micro Devices", "Analog Devices", "HP Inc.", "Lenovo", "Panasonic", "Accenture", "IBM", "Dell Technologies",
+    "Sony", "Hitachi", "Tencent", "Huawei", "Deutsche Telekom", "Meta", "AT&T", "Alibaba", "Jingdong", "Foxconn",
+    "Samsung Electronics", "Alphabet", "Apple", "Amazon", "Walmart", "UnitedHealth Group", "Berkshire Hathaway",
+    "CVS Health", "ExxonMobil", "McKesson Corporation", "Cencora", "Costco", "JPMorgan Chase", "Cardinal Health",
+    "Chevron Corporation", "Cigna", "Ford Motor Company", "Bank of America", "General Motors", "Elevance Health"
+]
 
 # ---------------- Helper Functions ----------------
 
@@ -177,11 +215,15 @@ def filter_jobs(csv_path):
 
 
 
-
 def send_csv_to_discord(csv_path):
     try:
+        # Load the CSV file into a DataFrame
         df = pd.read_csv(csv_path)
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')  # Ensure datetime
+
+        # Convert 'Date' column to datetime, coercing errors to NaT
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+
+        # Load job history and identify new jobs
         history = load_job_history()
         new_jobs = [job for _, job in df.iterrows() if is_new_job(job, history)]
         save_job_history(history)
@@ -190,31 +232,47 @@ def send_csv_to_discord(csv_path):
             logger.info("No new job openings found for today from target companies.")
             return
 
-        message = f"🎯 **New Job Openings from Target Companies** ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
-        for job in new_jobs:
-            message += f"**Company:** {job['Company']}\n"
-            message += f"**Position:** {job['Position Title']}\n"
-            message += f"**Apply:** {job['Apply']}\n"
-            message += "-------------------\n\n"
-        message += f"\nTotal new jobs found: {len(new_jobs)}"
+        # Prepare the message header
+        header = f"🎯 **New Job Openings from Target Companies** ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
+        message = header
 
-        logger.info(f"Sending the following message to Discord:\n{message}")
-        payload = {
-            "content": message,
-            "username": "Job Scraper Bot",
-            "avatar_url": "https://i.imgur.com/4M34hi2.png"
-        }
-        response = requests.post(WEBHOOK_URL, json=payload)
-        if response.status_code == 200:
-            logger.info("Successfully sent job openings to Discord")
-            return True
-        else:
-            logger.error(f"Failed to send to Discord. Status code: {response.status_code}")
-            logger.error(f"Response content: {response.text}")
-            return False
+        for job in new_jobs:
+            job_info = (
+                f"**Company:** {job['Company']}\n"
+                f"**Position:** {job['Position Title']}\n"
+                f"**Apply:** {job['Apply']}\n"
+                "-------------------\n\n"
+            )
+
+            # Check if adding the next job exceeds Discord's 2000-character limit
+            if len(message) + len(job_info) > 1900:
+                # Send the current message and start a new one
+                send_message_to_discord(message)
+                message = header + job_info
+            else:
+                # Add the job info to the current message
+                message += job_info
+
+        # Send any remaining message content
+        if message.strip():
+            send_message_to_discord(message)
+
     except Exception as e:
         logger.error(f"Error sending to Discord: {e}")
-        return False
+
+def send_message_to_discord(message):
+    """Helper function to send a message to Discord."""
+    payload = {
+        "content": message,
+        "username": "Job Scraper Bot",
+        "avatar_url": "https://i.imgur.com/4M34hi2.png"
+    }
+    response = requests.post(WEBHOOK_URL, json=payload)
+    if response.status_code == 200:
+        logger.info("Successfully sent job openings to Discord")
+    else:
+        logger.error(f"Failed to send to Discord. Status code: {response.status_code}")
+        logger.error(f"Response content: {response.text}")
 
 def download_airtable_csv(driver):
     try:
