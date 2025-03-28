@@ -77,3 +77,4 @@ jobs:
         git add job_data/job_history.json
         git commit -m "Update job history" || echo "No changes to commit"
         git push
+        
