@@ -18,18 +18,28 @@ jobs:
       
       - name: Install Chrome
         run: |
-          # Download Google Linux signing key and save it to keyring
+          # Download Google's Linux signing key and add it to a keyring file
           curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor | sudo tee /usr/share/keyrings/google-linux-signing-key.gpg > /dev/null
-          # Add Chrome repository with the signed-by option
+          # Add the Chrome repository with the signed-by option
           echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing-key.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
       
       - name: Install ChromeDriver
         run: |
+          # Debug: print Chrome version output
+          echo "Running: google-chrome-stable --version"
+          google-chrome-stable --version
+          
+          # Get Chrome version and extract the first three numeric parts
           CHROME_VERSION=$(google-chrome-stable --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-
+          echo "CHROME_VERSION: $CHROME_VERSION"
+          
+          # Use the major.minor version for lookup
           CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION%.*}")
+          echo "CHROMEDRIVER_VERSION: $CHROMEDRIVER_VERSION"
+          
+          # Download ChromeDriver
           wget -q "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip"
           unzip chromedriver_linux64.zip
           chmod +x chromedriver
