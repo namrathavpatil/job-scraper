@@ -119,6 +119,7 @@ def save_filtered_jobs_to_excel(df):
         logger.error(f"Error saving filtered jobs to Excel: {e}")
 
 def filter_jobs(csv_path):
+    """Filter jobs based on target companies and today's date, then save filtered data."""
     try:
         df = pd.read_csv(csv_path)
         logger.info("CSV Structure:")
@@ -127,33 +128,46 @@ def filter_jobs(csv_path):
         logger.info("\nSample of data:")
         logger.info(df.head())
 
+        # Convert 'Date' column to datetime safely
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        today = datetime.now().date()
+
+        # Drop rows where date conversion failed
+        df = df[df['Date'].notna()]
+
+        # Normalize dates to remove time for accurate comparison
+        df['OnlyDate'] = df['Date'].dt.normalize()
+        today = pd.Timestamp(datetime.now().date())
+
+        # Build regex pattern for matching companies
         company_pattern = '|'.join(map(re.escape, TARGET_COMPANIES))
 
+        # Filter for target companies AND today's date
         filtered_df = df[
             (df['Company'].str.contains(company_pattern, case=False, na=False)) &
-            (df['Date'].dt.date == today)
+            (df['OnlyDate'] == today)
         ]
 
         logger.info("\nFiltering Results:")
         logger.info(f"Total jobs before filtering: {len(df)}")
         logger.info(f"Jobs from target companies: {len(df[df['Company'].str.contains(company_pattern, case=False, na=False)])}")
-        logger.info(f"Jobs from today: {len(df[df['Date'].dt.date == today])}")
+        logger.info(f"Jobs from today: {len(df[df['OnlyDate'] == today])}")
         logger.info(f"Final filtered jobs: {len(filtered_df)}")
 
-        if len(filtered_df) > 0:
+        if not filtered_df.empty:
             logger.info("\nFiltered Jobs:")
             logger.info(filtered_df[['Company', 'Position Title', 'Date']].to_string())
             save_filtered_jobs_to_excel(filtered_df)
 
+        # Save filtered jobs to CSV
         filtered_csv_path = csv_path.replace('.csv', '_filtered.csv')
         filtered_df.to_csv(filtered_csv_path, index=False)
         logger.info(f"Filtered jobs saved to: {filtered_csv_path}")
         return filtered_csv_path
+
     except Exception as e:
         logger.error(f"Error filtering jobs: {e}")
         return None
+
 
 def send_csv_to_discord(csv_path):
     try:
