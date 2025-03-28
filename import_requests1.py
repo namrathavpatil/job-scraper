@@ -40,11 +40,9 @@ LOGGED_JOBS_FILE = os.path.join(BASE_DIR, "jobs_sent_to_discord.txt")
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 AIRTABLE_URL = os.getenv('AIRTABLE_URL')
     
-RESEARCH_WEBHOOK_URL = os.getenv('RESEARCH_WEBHOOK_URL')
-    
-UNIVERSITY_WEBHOOK_URL = os.getenv('UNIVERSITY_WEBHOOK_URL')
 
-if not WEBHOOK_URL or not AIRTABLE_URL or not RESEARCH_WEBHOOK_URL or not UNIVERSITY_WEBHOOK_URL:
+
+if not WEBHOOK_URL or not AIRTABLE_URL:
     logger.error("Missing required environment variables: WEBHOOK_URL, AIRTABLE_URL, RESEARCH_WEBHOOK_URL, or UNIVERSITY_WEBHOOK_URL")
     sys.exit(1)
 
@@ -146,15 +144,6 @@ def save_job_history(history):
     except Exception as e:
         logger.error(f"Error saving job history: {e}")
 
-def save_job_history(history):
-    try:
-        # Convert set to list before saving
-        history["seen_jobs"] = list(history.get("seen_jobs", set()))
-        with open(HISTORY_FILE, 'w') as f:
-            json.dump(history, f)
-        logger.info(f"Saved {len(history['seen_jobs'])} jobs to history")
-    except Exception as e:
-        logger.error(f"Error saving job history: {e}")
 
 def is_new_job(job, history):
     job_key = f"{job['Company']}_{job['Position Title']}"
@@ -228,49 +217,27 @@ def filter_jobs(csv_path):
             (df['OnlyDate'] == today)
         ]
 
-        # Filter researcher jobs
-        researcher_df = df[
-            df['Position Title'].str.contains('researcher', case=False, na=False)
-        ]
 
-        # Filter university jobs
-        university_df = df[
-            df['Company'].str.contains('university', case=False, na=False)
-        ]
-
-        # Exclude university jobs from researcher_df
-        non_university_researcher_df = researcher_df[
-            ~researcher_df['Company'].str.contains('university', case=False, na=False)
-        ]
-
-        researcher_combined_df = non_university_researcher_df
 
         logger.info(f"Target company jobs today: {len(company_df)}")
-        logger.info(f"'Researcher' jobs (non-university): {len(researcher_combined_df)}")
-        logger.info(f"University jobs found: {len(university_df)}")
+
 
         # Prepare output CSV paths
         company_csv = csv_path.replace('.csv', '_filtered_companies.csv')
-        researcher_csv = csv_path.replace('.csv', '_filtered_researchers.csv')
-        university_csv = csv_path.replace('.csv', '_filtered_universities.csv')
-
+      
         # Save CSVs
         if not company_df.empty:
             company_df.to_csv(company_csv, index=False)
-        if not researcher_combined_df.empty:
-            researcher_combined_df.to_csv(researcher_csv, index=False)
-        if not university_df.empty:
-            university_df.to_csv(university_csv, index=False)
+      
 
         # Save combined Excel
-        combined_df = pd.concat([company_df, researcher_combined_df, university_df]).drop_duplicates()
+        combined_df = pd.concat([company_df]).drop_duplicates()
         if not combined_df.empty:
             save_filtered_jobs_to_excel(combined_df)
 
         return (
             company_csv if not company_df.empty else None,
-            researcher_csv if not researcher_combined_df.empty else None,
-            university_csv if not university_df.empty else None
+    
         )
 
     except Exception as e:
@@ -428,20 +395,15 @@ def main():
             logger.error("No CSV file found after download; aborting.")
             return
 
-        company_csv, researcher_csv, university_csv = filter_jobs(csv_path)
+        (company_csv,) = filter_jobs(csv_path)
 
-        if not company_csv and not researcher_csv and not university_csv:
+
+        if not company_csv:
             logger.error("No relevant jobs found; aborting.")
             return
 
         if company_csv:
             send_csv_to_discord(company_csv, WEBHOOK_URL, label="Target Company Jobs")
-
-        if researcher_csv:
-            send_csv_to_discord(researcher_csv, RESEARCH_WEBHOOK_URL, label="Researcher Jobs")
-
-        if university_csv:
-            send_csv_to_discord(university_csv, UNIVERSITY_WEBHOOK_URL, label="University Jobs")
 
         try:
             os.remove(csv_path)
