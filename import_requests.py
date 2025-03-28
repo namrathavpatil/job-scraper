@@ -23,6 +23,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+LOGGED_JOBS_FILE = os.path.join(BASE_DIR, "jobs_sent_to_discord.txt")
+
 # Configuration from environment variables
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 AIRTABLE_URL = os.getenv('AIRTABLE_URL')
@@ -230,6 +232,19 @@ def filter_jobs(csv_path):
     except Exception as e:
         logger.error(f"Error filtering jobs: {e}")
         return None, None, None
+        
+def log_sent_jobs(jobs):
+    try:
+        with open(LOGGED_JOBS_FILE, "a") as f:
+            for job in jobs:
+                date_str = pd.to_datetime(job['Date'], errors='coerce')
+                if pd.isna(date_str):
+                    date_str = "Unknown"
+                else:
+                    date_str = date_str.strftime('%Y-%m-%d')
+                f.write(f"{job['Position Title']} | {job['Company']} | {date_str}\n")
+    except Exception as e:
+        logger.error(f"Error logging sent jobs: {e}")
 
 
 def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
@@ -278,11 +293,16 @@ def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
                 "avatar_url": "https://i.imgur.com/4M34hi2.png"
             }
             response = requests.post(webhook_url, json=payload)
-            if response.status_code not in [200, 204]:  # 204 is actually a success code
+
+            if response.status_code not in [200, 204]:  # 204 is also success
                 logger.error(f"Failed to send part {idx + 1} to Discord (label: {label}). Status code: {response.status_code}")
                 logger.error(f"Response content: {response.text}")
                 return False
+
             time.sleep(1)
+
+        # ✅ Log sent jobs after successful posts
+        log_sent_jobs(new_jobs)
 
         logger.info(f"Successfully sent {label.lower()} to Discord.")
         return True
@@ -290,6 +310,7 @@ def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
     except Exception as e:
         logger.error(f"Error sending {label.lower()} to Discord: {e}")
         return False
+
 
 
 def download_airtable_csv(driver):
