@@ -71,20 +71,6 @@ class JobDatabase:
             logger.error(f"Error marking job as seen: {e}")
             return False
     
-    def get_jobs_seen_today(self):
-        """Get all jobs seen today."""
-        try:
-            today = datetime.utcnow().date()
-            return list(self.jobs.find({
-                "date_seen": {
-                    "$gte": datetime.combine(today, datetime.min.time()),
-                    "$lt": datetime.combine(today, datetime.max.time())
-                }
-            }))
-        except Exception as e:
-            logger.error(f"Error getting jobs seen today: {e}")
-            return []
-    
     def cleanup_old_jobs(self, days=30):
         """Remove jobs older than specified days."""
         try:
