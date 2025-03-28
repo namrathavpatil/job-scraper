@@ -3,10 +3,10 @@ name: Job Scraper
 on:
   schedule:
     - cron: '0 * * * *'  # Runs every hour
-  workflow_dispatch:  # Allows manual trigger
+  workflow_dispatch:
 
 permissions:
-  contents: write  # Needed to push updates to job_history.json
+  contents: write
 
 jobs:
   scrape:
@@ -32,7 +32,6 @@ jobs:
         echo "Running: google-chrome-stable --version"
         google-chrome-stable --version
         CHROMEDRIVER_VERSION="134.0.6998.165"
-        echo "Using ChromeDriver version: $CHROMEDRIVER_VERSION"
         wget -q "https://storage.googleapis.com/chrome-for-testing-public/$CHROMEDRIVER_VERSION/linux64/chromedriver-linux64.zip"
         unzip chromedriver-linux64.zip
         chmod +x chromedriver-linux64/chromedriver
@@ -44,7 +43,7 @@ jobs:
         pip install -r requirements.txt
 
     - name: Create job data directory
-      run: mkdir -p job_data/csv_files
+      run: mkdir -p job_data
 
     - name: Run job scraper
       env:
@@ -57,13 +56,6 @@ jobs:
       with:
         name: job-history
         path: job_data/job_history.json
-        retention-days: 30
-
-    - name: Upload filtered Excel file
-      uses: actions/upload-artifact@v4
-      with:
-        name: filtered-jobs-excel
-        path: job_data/filtered_jobs.xlsx
         retention-days: 30
 
     - name: Commit updated job history
