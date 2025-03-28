@@ -15,6 +15,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import sys
+import pytz  # Make sure this is at the top of your file
 
 # Set up logging
 logging.basicConfig(
@@ -92,15 +93,17 @@ def load_job_history():
         if os.path.exists(HISTORY_FILE):
             with open(HISTORY_FILE, 'r') as f:
                 data = json.load(f)
+                # Convert list to set if it exists, otherwise create empty set
                 data["seen_jobs"] = set(data.get("seen_jobs", []))
                 return data
-        return {"seen_jobs": []}
+        return {"seen_jobs": set()}
     except Exception as e:
         logger.error(f"Error loading job history: {e}")
-        return {"seen_jobs": []}
+        return {"seen_jobs": set()}
 
 def save_job_history(history):
     try:
+        # Convert set to list before saving
         history["seen_jobs"] = list(history.get("seen_jobs", set()))
         with open(HISTORY_FILE, 'w') as f:
             json.dump(history, f)
@@ -110,7 +113,7 @@ def save_job_history(history):
 def is_new_job(job, history):
     job_key = f"{job['Company']}_{job['Position Title']}"
     if job_key not in history["seen_jobs"]:
-        history["seen_jobs"].append(job_key)
+        history["seen_jobs"].add(job_key)  # Use add() for sets instead of append()
         return True
     return False
 
@@ -160,8 +163,6 @@ def save_filtered_jobs_to_excel(df):
     except Exception as e:
         logger.error(f"Error saving filtered jobs to Excel: {e}")
 
-import pytz  # Make sure this is at the top of your file
-
 def filter_jobs(csv_path):
     """Filter jobs based on target companies and today's date in LA timezone, then save filtered data."""
     try:
@@ -170,14 +171,10 @@ def filter_jobs(csv_path):
         logger.info("CSV Structure:")
         logger.info(f"Columns: {list(df.columns)}")
         logger.info(f"Number of rows: {len(df)}")
-        logger.info("\nSample of data:")
-        logger.info(df.head())
 
         # Convert 'Date' column to datetime
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         logger.info("Converted 'Date' column to datetime.")
-        logger.info("First 10 non-null dates:")
-        logger.info(df['Date'].dropna().head(10))
         logger.info(f"Earliest date in data: {df['Date'].min()}")
         logger.info(f"Latest date in data: {df['Date'].max()}")
 
@@ -185,17 +182,21 @@ def filter_jobs(csv_path):
         la_tz = pytz.timezone("America/Los_Angeles")
         today = datetime.now(la_tz).date()
 
+        # Filter out rows with invalid dates
+        df = df[df['Date'].notna()]
+        df['OnlyDate'] = df['Date'].dt.date
+
         company_pattern = '|'.join(map(re.escape, TARGET_COMPANIES))
 
         filtered_df = df[
             (df['Company'].str.contains(company_pattern, case=False, na=False)) &
-            (df['Date'].dt.date == today)
+            (df['OnlyDate'] == today)
         ]
 
         logger.info("\nFiltering Results:")
         logger.info(f"Total jobs before filtering: {len(df)}")
         logger.info(f"Jobs from target companies: {len(df[df['Company'].str.contains(company_pattern, case=False, na=False)])}")
-        logger.info(f"Jobs from today: {len(df[df['Date'].dt.date == today])}")
+        logger.info(f"Jobs from today: {len(df[df['OnlyDate'] == today])}")
         logger.info(f"Final filtered jobs: {len(filtered_df)}")
 
         if not filtered_df.empty:
@@ -213,10 +214,16 @@ def filter_jobs(csv_path):
         logger.error(f"Error filtering jobs: {e}")
         return None
 
-
-
 def send_csv_to_discord(csv_path):
     try:
+        if not WEBHOOK_URL:
+            logger.error("Webhook URL is empty")
+            return False
+
+        if not WEBHOOK_URL.startswith('http'):
+            logger.error("Invalid webhook URL format")
+            return False
+
         # Load the CSV file into a DataFrame
         df = pd.read_csv(csv_path)
 
@@ -230,7 +237,9 @@ def send_csv_to_discord(csv_path):
 
         if not new_jobs:
             logger.info("No new job openings found for today from target companies.")
-            return
+            return True
+
+        logger.info(f"Found {len(new_jobs)} new jobs to send to Discord")
 
         # Prepare the message header
         header = f"🎯 **New Job Openings from Target Companies** ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
@@ -247,7 +256,8 @@ def send_csv_to_discord(csv_path):
             # Check if adding the next job exceeds Discord's 2000-character limit
             if len(message) + len(job_info) > 1900:
                 # Send the current message and start a new one
-                send_message_to_discord(message)
+                if not send_message_to_discord(message):
+                    return False
                 message = header + job_info
             else:
                 # Add the job info to the current message
@@ -255,10 +265,15 @@ def send_csv_to_discord(csv_path):
 
         # Send any remaining message content
         if message.strip():
-            send_message_to_discord(message)
+            if not send_message_to_discord(message):
+                return False
+
+        logger.info("Successfully sent all job openings to Discord")
+        return True
 
     except Exception as e:
         logger.error(f"Error sending to Discord: {e}")
+        return False
 
 def send_message_to_discord(message):
     """Helper function to send a message to Discord."""
@@ -268,11 +283,13 @@ def send_message_to_discord(message):
         "avatar_url": "https://i.imgur.com/4M34hi2.png"
     }
     response = requests.post(WEBHOOK_URL, json=payload)
-    if response.status_code == 200:
-        logger.info("Successfully sent job openings to Discord")
+    if response.status_code in [200, 204]:  # Both 200 and 204 are success codes
+        logger.info("Successfully sent message to Discord")
+        return True
     else:
         logger.error(f"Failed to send to Discord. Status code: {response.status_code}")
         logger.error(f"Response content: {response.text}")
+        return False
 
 def download_airtable_csv(driver):
     try:
