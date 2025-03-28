@@ -5,10 +5,8 @@ on:
     - cron: '0 * * * *'  # Runs every hour
   workflow_dispatch:  # Allows manual trigger
 
-# Add permissions block
 permissions:
   contents: read
-  artifacts: write
 
 jobs:
   scrape:
@@ -52,15 +50,8 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Create job history directory
+    - name: Create job data directory
       run: mkdir -p job_data
-    
-    - name: Download job history artifact
-      uses: actions/download-artifact@v3
-      with:
-        name: job-history
-        path: job_data
-        if-no-files-found: ignore
     
     - name: Run job scraper
       env:
@@ -69,10 +60,3 @@ jobs:
         RESEARCH_WEBHOOK_URL: ${{ secrets.RESEARCH_WEBHOOK_URL }}
         UNIVERSITY_WEBHOOK_URL: ${{ secrets.UNIVERSITY_WEBHOOK_URL }}
       run: python import_requests.py
-    
-    - name: Upload job history artifact
-      uses: actions/upload-artifact@v3
-      with:
-        name: job-history
-        path: job_data/job_history.json
-        retention-days: 30  # Keep the artifact for 30 days
