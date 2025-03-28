@@ -13,7 +13,6 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import sys
 
 # Set up logging
@@ -23,400 +22,149 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-# Define base directory (adjust as needed)
-BASE_DIR = os.path.join(os.getcwd(), "job_data")
-# Define the base directory where job data will be stored
-BASE_DIR = os.path.join(os.getcwd(), "job_data")
-os.makedirs(BASE_DIR, exist_ok=True)  # Create the directory if it doesn't exist
-
-# Define the log file path
-LOGGED_JOBS_FILE = os.path.join(BASE_DIR, "jobs_sent_to_discord.txt")
-
-# Now you can use it
-LOGGED_JOBS_FILE = os.path.join(BASE_DIR, "jobs_sent_to_discord.txt")
-
 # Configuration from environment variables
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 AIRTABLE_URL = os.getenv('AIRTABLE_URL')
-    
-
 
 if not WEBHOOK_URL or not AIRTABLE_URL:
-    logger.error("Missing required environment variables: WEBHOOK_URL, AIRTABLE_URL, RESEARCH_WEBHOOK_URL, or UNIVERSITY_WEBHOOK_URL")
+    logger.error("Missing required environment variables: WEBHOOK_URL or AIRTABLE_URL")
     sys.exit(1)
 
-
-# Set up directories (adjust as needed)
+# Directories
 BASE_DIR = os.path.join(os.getcwd(), "job_data")
 CSV_DIR = os.path.join(BASE_DIR, "csv_files")
 HISTORY_FILE = os.path.join(BASE_DIR, "job_history.json")
 FILTERED_EXCEL = os.path.join(BASE_DIR, "filtered_jobs.xlsx")
 LOGGED_JOBS_FILE = os.path.join(BASE_DIR, "jobs_sent_to_discord.txt")
 
-# Create directories if they don't exist
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(CSV_DIR, exist_ok=True)
 
-# Target companies to filter for (including TikTok)
+# Target companies
+TARGET_COMPANIES = [...]  # Keep your full list here
 
-#TARGET_COMPANIES = ["Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper", "Yahoo", "Tesla", "Nvidia", "Hyundai", "Deloitte", "PwC", "EY", "KPMG", "Goldman Sachs", "The Walt Disney Company", "Wells Fargo", "McKinsey & Company", "Riot Games", "Tinder", "DISQO", "GumGum", "MySpace", "Telesign", "PeerStreet", "Escape Communications", "Push Media", "Quantum Dimension", "Robin Labs", "Southbay", "The White Rabbit Entertainment", "Rubicon Project", "TaskUs", "AssetAvenue", "Clutter"]
-TARGET_COMPANIES = [
-    "Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper", "Yahoo", "Tesla", "Nvidia",
-    "Hyundai", "Deloitte", "PwC", "EY", "KPMG", "Goldman Sachs", "The Walt Disney Company", "Wells Fargo",
-    "McKinsey & Company", "Riot Games", "Tinder", "DISQO", "GumGum", "MySpace", "Telesign", "PeerStreet",
-    "Escape Communications", "Push Media", "Quantum Dimension", "Robin Labs", "Southbay", "The White Rabbit Entertainment",
-    "Rubicon Project", "TaskUs", "AssetAvenue", "Clutter", "Intel", "Samsung", "Qualcomm", "AMD", "LiveRamp",
-    "Red Hat", "Ciena", "Acadaca", "TP-Link", "CoBank", "Intermountain Health", "Hexagon Manufacturing Intelligence",
-    "North Carolina State University", "ProbablyMonsters", "Western Digital", "Boise State University", "TabaPay",
-    "The New York Times", "Wolters Kluwer", "Siemens Healthineers", "Cboe Global Markets", "Exelon", "Medtronic",
-    "Collins Aerospace", "General Dynamics Information Technology", "General Atomics", "Walgreens", "Delmarva Power",
-    "CGI", "Midland Credit Management", "Fiserv", "Capital One", "Teledyne Technologies Incorporated", "ByteDance",
-    "Haas Automation, Inc.", "SpaceX", "Tatari", "Aspen Technology", "Vertafore", "Mission Technologies",
-    "Palantir Technologies", "Adobe", "Medpace", "Mastercard", "Rambus", "The Reynolds and Reynolds Company",
-    "Boeing", "Analog Devices", "Northrop Grumman", "Patterson Companies, Inc.", "Piper Companies", "Aperia Technologies",
-    "Galaxy", "Costco Wholesale", "Texas A&M Engineering Experiment Station (TEES)", "Moffatt & Nichol", "Quick Quack Car Wash",
-    "KLA", "Lockheed Martin", "University of Maryland Medical System", "Belvedere Trading, LLC", "Casey's",
-    "The University of Texas at Austin", "Daimler Truck North America", "Texas A&M University", "Coalition, Inc.",
-    "Delta Solutions and Strategies", "Ennoble First Inc.", "FloQast", "Spring Health", "American Family Insurance",
-    "Resideo", "Freddie Mac", "NetSuite", "Virginia Commonwealth University", "AMEWAS, Inc.", "Esri", "Stanford Health Care",
-    "Prime Healthcare", "Leonardo DRS", "Wizards of the Coast", "Ancestry", "General Atomics Aeronautical Systems",
-    "Federal Signal Corporation", "Afficiency", "Amazon Web Services (AWS)", "BlackRock", "AppLovin", "Sinch",
-    "Catalent Pharma Solutions", "Splunk", "Field Agent", "Kensho Technologies", "Parsons Corporation", "Nature's Bakery",
-    "Neuralink", "AIG", "Atlassian", "Odoo", "Ascend Analytics", "Sandia National Laboratories", "Blue Origin",
-    "Corpay", "Madiba, Inc.", "TraceGains", "Abbott", "American Electric Power", "Moveworks", "Cognizant", "University of Virginia",
-    "California Highway Patrol", "University of Southern California", "Nidec Motor Corporation", "Austin Community College",
-    "Diversified Services Network, Inc.", "Plexus Corp.", "State of Nebraska", "Experian", "Infinite Campus", "Affirm",
-    "Addepar", "HSA Bank", "Perdue Farms", "CodePath", "Twitch", "Rockstar Games", "HashiCorp", "Peraton", "SquareTrade",
-    "Nintendo", "WOOD Consulting Services, Inc.", "Trillium Health Resources", "Target", "Sierra Nevada Corporation",
-    "Bectran, Inc.", "Walmart", "DoorDash", "eBay", "Airbnb", "Chewy", "Wayfair", "Expedia Group", "Booking Holdings",
-    "Coupang", "Uber Technologies", "Concentrix", "Science Applications International", "Insight Enterprises",
-    "Booz Allen Hamilton Holding", "DXC Technology", "Leidos Holdings", "Kyndryl Holdings", "Cognizant Technology Solutions",
-    "CDW", "IBM", "Motorola Solutions", "Amphenol", "Cisco Systems", "ON Semiconductor", "Microchip Technology",
-    "Sanmina", "KLA", "Lam Research", "Texas Instruments", "Applied Materials", "Micron Technology", "Jabil", "Broadcom",
-    "Advanced Micro Devices", "Analog Devices", "HP Inc.", "Lenovo", "Panasonic", "Accenture", "IBM", "Dell Technologies",
-    "Sony", "Hitachi", "Tencent", "Huawei", "Deutsche Telekom", "Meta", "AT&T", "Alibaba", "Jingdong", "Foxconn",
-    "Samsung Electronics", "Alphabet", "Apple", "Amazon", "Walmart", "UnitedHealth Group", "Berkshire Hathaway",
-    "CVS Health", "ExxonMobil", "McKesson Corporation", "Cencora", "Costco", "JPMorgan Chase", "Cardinal Health",
-    "Chevron Corporation", "Cigna", "Ford Motor Company", "Bank of America", "General Motors", "Elevance Health"
-]
-
-# ---------------- Helper Functions ----------------
-
-
-def log_sent_jobs(jobs):
+def load_job_history():
     try:
-        os.makedirs(BASE_DIR, exist_ok=True)  # Make sure the folder exists
-        if not os.path.exists(LOGGED_JOBS_FILE):
-            with open(LOGGED_JOBS_FILE, "w") as f:
-                f.write("Position Title | Company | Date\n")  # Header for first-time file
-
-        with open(LOGGED_JOBS_FILE, "a") as f:
-            for job in jobs:
-                date_str = pd.to_datetime(job['Date'], errors='coerce')
-                if pd.isna(date_str):
-                    date_str = "Unknown"
-                else:
-                    date_str = date_str.strftime('%Y-%m-%d')
-                f.write(f"{job['Position Title']} | {job['Company']} | {date_str}\n")
-    except Exception as e:
-        logger.error(f"Error logging sent jobs: {e}")
+        if os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, 'r') as f:
+                data = json.load(f)
+                data["seen_jobs"] = set(data.get("seen_jobs", []))
+                return data
+        return {"seen_jobs": set()}
+    except:
+        return {"seen_jobs": set()}
 
 def save_job_history(history):
-    try:
-        # Convert set to list before saving
-        history["seen_jobs"] = list(history.get("seen_jobs", set()))
-        with open(HISTORY_FILE, 'w') as f:
-            json.dump(history, f)
-        logger.info(f"Saved {len(history['seen_jobs'])} jobs to history")
-        
-        # If running in GitHub Actions, commit the changes
-        if os.getenv('GITHUB_ACTIONS'):
-            try:
-                os.system('git config --global user.name "github-actions"')
-                os.system('git config --global user.email "actions@github.com"')
-                os.system(f'git add {HISTORY_FILE}')
-                os.system('git commit -m "Update job history" || echo "No changes to commit"')
-                os.system('git push')
-                logger.info("Committed job history changes to repository")
-            except Exception as e:
-                logger.error(f"Error committing job history: {e}")
-    except Exception as e:
-        logger.error(f"Error saving job history: {e}")
-
+    history["seen_jobs"] = list(history.get("seen_jobs", set()))
+    with open(HISTORY_FILE, 'w') as f:
+        json.dump(history, f)
 
 def is_new_job(job, history):
-    job_key = f"{job['Company']}_{job['Position Title']}"
-    if job_key not in history["seen_jobs"]:
-        history["seen_jobs"].add(job_key)
-        logger.info(f"Found new job: {job['Company']} - {job['Position Title']}")
+    key = f"{job['Company']}_{job['Position Title']}"
+    if key not in history['seen_jobs']:
+        history['seen_jobs'].add(key)
         return True
-    logger.debug(f"Skipping already seen job: {job['Company']} - {job['Position Title']}")
     return False
 
 def setup_driver():
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-infobars")
-    chrome_options.add_argument("--remote-debugging-port=9222")
-    prefs = {
-        "download.default_directory": CSV_DIR,
-        "download.prompt_for_download": False,
-        "download.directory_upgrade": True,
-        "safebrowsing.enabled": True,
-        "browser.helperApps.neverAsk.saveToDisk": "text/csv"
-    }
-    chrome_options.add_experimental_option("prefs", prefs)
-    chrome_options.add_argument("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-    service = Service('/usr/bin/chromedriver')
-    return webdriver.Chrome(service=service, options=chrome_options)
-
-def cleanup_old_csvs():
-    current_time = datetime.now()
-    for filename in os.listdir(CSV_DIR):
-        if filename.endswith('.csv'):
-            file_path = os.path.join(CSV_DIR, filename)
-            file_time = datetime.fromtimestamp(os.path.getctime(file_path))
-            if current_time - file_time > timedelta(hours=1):
-                try:
-                    os.remove(file_path)
-                    logger.info(f"Deleted old CSV file: {filename}")
-                except Exception as e:
-                    logger.error(f"Error deleting old CSV file {filename}: {e}")
-
-def save_filtered_jobs_to_excel(df):
-    try:
-        if os.path.exists(FILTERED_EXCEL):
-            os.remove(FILTERED_EXCEL)
-            logger.info(f"Deleted previous filtered jobs Excel file: {FILTERED_EXCEL}")
-        df.to_excel(FILTERED_EXCEL, index=False)
-        logger.info(f"Saved filtered jobs to: {FILTERED_EXCEL}")
-        logger.info(f"Total jobs saved to Excel: {len(df)}")
-    except Exception as e:
-        logger.error(f"Error saving filtered jobs to Excel: {e}")
-
-import pytz  # Make sure this is at the top of your file
-
-def filter_jobs(csv_path):
-    try:
-        df = pd.read_csv(csv_path)
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df = df[df['Date'].notna()]
-        df['OnlyDate'] = df['Date'].dt.normalize()
-        today = pd.Timestamp(datetime.now().date())
-        company_pattern = '|'.join(map(re.escape, TARGET_COMPANIES))
-
-        # Filter jobs for target companies posted today
-        company_df = df[
-            df['Company'].str.contains(company_pattern, case=False, na=False) &
-            (df['OnlyDate'] == today)
-        ]
-
-
-
-        logger.info(f"Target company jobs today: {len(company_df)}")
-
-
-        # Prepare output CSV paths
-        company_csv = csv_path.replace('.csv', '_filtered_companies.csv')
-      
-        # Save CSVs
-        if not company_df.empty:
-            company_df.to_csv(company_csv, index=False)
-      
-
-        # Save combined Excel
-        combined_df = pd.concat([company_df]).drop_duplicates()
-        if not combined_df.empty:
-            save_filtered_jobs_to_excel(combined_df)
-
-        return (
-            company_csv if not company_df.empty else None,
-    
-        )
-
-    except Exception as e:
-        logger.error(f"Error filtering jobs: {e}")
-        return None, None, None
-        
-def log_sent_jobs(jobs):
-    try:
-        os.makedirs(BASE_DIR, exist_ok=True)  # Make sure the folder exists
-        if not os.path.exists(LOGGED_JOBS_FILE):
-            with open(LOGGED_JOBS_FILE, "w") as f:
-                f.write("Position Title | Company | Date\n")  # Header for first-time file
-
-        with open(LOGGED_JOBS_FILE, "a") as f:
-            for job in jobs:
-                date_str = pd.to_datetime(job['Date'], errors='coerce')
-                if pd.isna(date_str):
-                    date_str = "Unknown"
-                else:
-                    date_str = date_str.strftime('%Y-%m-%d')
-                f.write(f"{job['Position Title']} | {job['Company']} | {date_str}\n")
-    except Exception as e:
-        logger.error(f"Error logging sent jobs: {e}")
-
-
-def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
-    try:
-        if not webhook_url:
-            logger.error(f"Webhook URL is empty for {label}")
-            return False
-
-        if not webhook_url.startswith('http'):
-            logger.error(f"Invalid webhook URL format for {label}")
-            return False
-
-        # Load job history at the start
-        history = load_job_history()
-        logger.info(f"Checking {label} against {len(history['seen_jobs'])} previously seen jobs")
-
-        df = pd.read_csv(csv_path)
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        
-        # Filter for new jobs
-        new_jobs = [job for _, job in df.iterrows() if is_new_job(job, history)]
-        
-        if not new_jobs:
-            logger.info(f"No new {label.lower()} found.")
-            return True
-
-        logger.info(f"Found {len(new_jobs)} new {label.lower()} to send to Discord")
-
-        base_time = datetime.now().strftime('%Y-%m-%d %H:%M')
-        messages = []
-        current_msg = f"🎯 **{label}** ({base_time})\n\n"
-
-        for job in new_jobs:
-            job_text = (
-                f"**Company:** {job['Company']}\n"
-                f"**Position:** {job['Position Title']}\n"
-                f"**Apply:** {job['Apply']}\n"
-                "-------------------\n\n"
-            )
-            if len(current_msg) + len(job_text) > 1900:
-                messages.append(current_msg)
-                current_msg = ""
-            current_msg += job_text
-
-        if current_msg:
-            messages.append(current_msg)
-
-        success = True
-        for idx, msg in enumerate(messages):
-            payload = {
-                "content": msg,
-                "username": "Job Scraper Bot",
-                "avatar_url": "https://i.imgur.com/4M34hi2.png"
-            }
-            response = requests.post(webhook_url, json=payload)
-
-            if response.status_code in [200, 204]:  # Both are success codes
-                logger.info(f"Successfully sent part {idx + 1} to Discord (label: {label})")
-            else:
-                logger.error(f"Failed to send part {idx + 1} to Discord (label: {label}). Status code: {response.status_code}")
-                logger.error(f"Response content: {response.text}")
-                success = False
-
-            time.sleep(1)
-
-        if success:
-            try:
-                # Save to job history
-                logger.info(f"Saving {len(new_jobs)} new jobs to history file")
-                save_job_history(history)
-                
-                # Log sent jobs to text file
-                logger.info(f"Logging {len(new_jobs)} sent jobs to {LOGGED_JOBS_FILE}")
-                log_sent_jobs(new_jobs)
-                
-                logger.info(f"Successfully sent all {label.lower()} to Discord and updated both history files")
-            except Exception as e:
-                logger.error(f"Error saving job history or logging sent jobs: {e}")
-                # Don't return False here as the Discord messages were sent successfully
-        else:
-            logger.error(f"Failed to send all {label.lower()} to Discord, not updating history")
-            return False
-
-        return True
-
-    except Exception as e:
-        logger.error(f"Error sending {label.lower()} to Discord: {e}")
-        return False
-
-
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--user-agent=Mozilla/5.0")
+    prefs = {"download.default_directory": CSV_DIR, "download.prompt_for_download": False}
+    options.add_experimental_option("prefs", prefs)
+    return webdriver.Chrome(service=Service('/usr/bin/chromedriver'), options=options)
 
 def download_airtable_csv(driver):
-    try:
-        driver.get(AIRTABLE_URL)
-        logger.info("Navigated to Airtable URL")
-        time.sleep(5)
-        wait = WebDriverWait(driver, 10)
-        wait.until(EC.element_to_be_clickable((By.CLASS_NAME, "viewMenuButton"))).click()
-        logger.info("Clicked view menu button")
-        time.sleep(1)
-        wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-tutorial-selector-id='viewMenuItem-viewExportCsv']"))).click()
-        logger.info("Clicked Download CSV option")
-        time.sleep(10)
-
-        downloaded_files = [f for f in os.listdir(CSV_DIR) if f.endswith('.csv')]
-        if not downloaded_files:
-            logger.error("No CSV file found in downloads")
-            return None
-
-        latest_csv = max(downloaded_files, key=lambda x: os.path.getctime(os.path.join(CSV_DIR, x)))
-        csv_path = os.path.join(CSV_DIR, latest_csv)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-        new_path = os.path.join(CSV_DIR, f"jobs_{timestamp}.csv")
-        os.rename(csv_path, new_path)
-        logger.info(f"Saved CSV to: {new_path}")
-        return new_path
-    except Exception as e:
-        logger.error(f"Error downloading CSV: {e}")
+    driver.get(AIRTABLE_URL)
+    time.sleep(5)
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CLASS_NAME, "viewMenuButton"))).click()
+    time.sleep(1)
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-tutorial-selector-id='viewMenuItem-viewExportCsv']"))).click()
+    time.sleep(10)
+    csv_files = [f for f in os.listdir(CSV_DIR) if f.endswith('.csv')]
+    if not csv_files:
         return None
+    latest = max(csv_files, key=lambda f: os.path.getctime(os.path.join(CSV_DIR, f)))
+    new_path = os.path.join(CSV_DIR, f"jobs_{datetime.now().strftime('%Y%m%d_%H%M')}.csv")
+    os.rename(os.path.join(CSV_DIR, latest), new_path)
+    return new_path
 
-# ---------------- Main Execution ----------------
+def filter_jobs(csv_path):
+    df = pd.read_csv(csv_path)
+    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+    df = df[df['Date'].notna()]
+    df['OnlyDate'] = df['Date'].dt.normalize()
+    today = pd.Timestamp(datetime.now().date())
+    pattern = '|'.join(map(re.escape, TARGET_COMPANIES))
+    df = df[df['Company'].str.contains(pattern, case=False, na=False) & (df['OnlyDate'] == today)]
+    if not df.empty:
+        df.to_excel(FILTERED_EXCEL, index=False)
+        df.to_csv(csv_path, index=False)
+        return csv_path
+    return None
+
+def log_sent_jobs(jobs):
+    with open(LOGGED_JOBS_FILE, "a") as f:
+        for job in jobs:
+            date = pd.to_datetime(job['Date'], errors='coerce')
+            date_str = date.strftime('%Y-%m-%d') if not pd.isna(date) else "Unknown"
+            f.write(f"{job['Position Title']} | {job['Company']} | {date_str}\n")
+
+def send_csv_to_discord(csv_path, webhook_url, label):
+    if not webhook_url:
+        return False
+    history = load_job_history()
+    df = pd.read_csv(csv_path)
+    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+    new_jobs = [job for _, job in df.iterrows() if is_new_job(job, history)]
+    if not new_jobs:
+        return True
+
+    messages, msg = [], f"🎯 **{label}** ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
+    for job in new_jobs:
+        txt = f"**Company:** {job['Company']}\n**Position:** {job['Position Title']}\n**Apply:** {job['Apply']}\n-------------------\n\n"
+        if len(msg) + len(txt) > 1900:
+            messages.append(msg)
+            msg = ""
+        msg += txt
+    if msg:
+        messages.append(msg)
+
+    for m in messages:
+        res = requests.post(webhook_url, json={"content": m, "username": "Job Scraper Bot", "avatar_url": "https://i.imgur.com/4M34hi2.png"})
+        if res.status_code not in [200, 204]:
+            return False
+        time.sleep(1)
+
+    save_job_history(history)
+    log_sent_jobs(new_jobs)
+    return True
+
+def cleanup_old_csvs():
+    now = datetime.now()
+    for f in os.listdir(CSV_DIR):
+        path = os.path.join(CSV_DIR, f)
+        if f.endswith(".csv") and now - datetime.fromtimestamp(os.path.getctime(path)) > timedelta(hours=1):
+            os.remove(path)
 
 def main():
-    try:
-        logger.info("Starting job scraping process...")
-        cleanup_old_csvs()
-        driver = setup_driver()
-        csv_path = download_airtable_csv(driver)
-        driver.quit()
+    cleanup_old_csvs()
+    driver = setup_driver()
+    csv_path = download_airtable_csv(driver)
+    driver.quit()
 
-        if not csv_path:
-            logger.error("No CSV file found after download; aborting.")
-            return
+    if not csv_path:
+        return
 
-        (company_csv,) = filter_jobs(csv_path)
+    filtered_csv = filter_jobs(csv_path)
+    if filtered_csv:
+        send_csv_to_discord(filtered_csv, WEBHOOK_URL, "Target Company Jobs")
 
-
-        if not company_csv:
-            logger.error("No relevant jobs found; aborting.")
-            return
-
-        if company_csv:
-            send_csv_to_discord(company_csv, WEBHOOK_URL, label="Target Company Jobs")
-
-        try:
-            os.remove(csv_path)
-            logger.info("Removed downloaded CSV file after processing.")
-        except Exception as e:
-            logger.error(f"Error removing CSV file: {e}")
-
-        logger.info("Job scraping process completed")
-    except Exception as e:
-        logger.error(f"Error in main execution: {e}")
-        raise
-
-
+    os.remove(csv_path)
 
 if __name__ == "__main__":
     main()
