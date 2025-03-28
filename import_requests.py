@@ -15,6 +15,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # ---------- Setup ----------
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("JobScraper")
 
@@ -30,7 +31,7 @@ CSV_DIR = BASE_DIR / "csv_files"
 HISTORY_FILE = BASE_DIR / "job_history.json"
 FILTERED_EXCEL = BASE_DIR / "filtered_jobs.xlsx"
 
-TARGET_COMPANIES = ["Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper","Mayo Clinic"]
+TARGET_COMPANIES = ["Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper"]
 
 BASE_DIR.mkdir(parents=True, exist_ok=True)
 CSV_DIR.mkdir(parents=True, exist_ok=True)
@@ -65,7 +66,7 @@ def setup_driver():
         "download.prompt_for_download": False
     }
     options.add_experimental_option("prefs", prefs)
-    service = Service("/usr/bin/chromedriver")
+    service = Service("/usr/bin/chromedriver")  # Adjust path if needed
     return webdriver.Chrome(service=service, options=options)
 
 def cleanup_old_csvs():
@@ -109,7 +110,14 @@ def filter_jobs(csv_path):
     )
     filtered = df[mask]
 
+    logger.info(f"Total jobs before filtering: {len(df)}")
+    logger.info(f"Jobs from target companies: {len(df[df['Company'].str.contains('|'.join(TARGET_COMPANIES), case=False, na=False)])}")
+    logger.info(f"Jobs from today: {len(df[df['Date'].notna() & (df['Date'].dt.date == today)])}")
+    logger.info(f"Final filtered jobs: {len(filtered)}")
+
     if not filtered.empty:
+        logger.info("\nFiltered Jobs:")
+        logger.info(filtered[['Company', 'Position Title', 'Date']].to_string())
         filtered.to_csv(str(csv_path).replace(".csv", "_filtered.csv"), index=False)
         filtered.to_excel(FILTERED_EXCEL, index=False)
         return filtered
@@ -135,9 +143,9 @@ def send_to_discord(jobs_df):
 
 def main():
     logger.info("🔍 Starting job scraper...")
+
     cleanup_old_csvs()
     driver = setup_driver()
-
     try:
         csv_path = download_csv(driver)
     finally:
