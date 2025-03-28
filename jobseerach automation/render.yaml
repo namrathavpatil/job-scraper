@@ -1,0 +1,13 @@
+services:
+  - type: worker
+    name: job-scraper
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python import_requests.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: WEBHOOK_URL
+        sync: false
+      - key: AIRTABLE_URL
+        sync: false 
