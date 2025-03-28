@@ -15,7 +15,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import sys
-import pytz  # Make sure this is at the top of your file
 
 # Set up logging
 logging.basicConfig(
@@ -24,16 +23,31 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# Define base directory (adjust as needed)
+BASE_DIR = os.path.join(os.getcwd(), "job_data")
+# Define the base directory where job data will be stored
+BASE_DIR = os.path.join(os.getcwd(), "job_data")
+os.makedirs(BASE_DIR, exist_ok=True)  # Create the directory if it doesn't exist
+
+# Define the log file path
+LOGGED_JOBS_FILE = os.path.join(BASE_DIR, "jobs_sent_to_discord.txt")
+
+# Now you can use it
+LOGGED_JOBS_FILE = os.path.join(BASE_DIR, "jobs_sent_to_discord.txt")
+
 # Configuration from environment variables
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-
-
-
-
 AIRTABLE_URL = os.getenv('AIRTABLE_URL')
-if not WEBHOOK_URL or not AIRTABLE_URL:
-    logger.error("Missing required environment variables: WEBHOOK_URL or AIRTABLE_URL")
+    
+RESEARCH_WEBHOOK_URL = os.getenv('RESEARCH_WEBHOOK_URL')
+    
+UNIVERSITY_WEBHOOK_URL = os.getenv('UNIVERSITY_WEBHOOK_URL')
+
+if not WEBHOOK_URL or not AIRTABLE_URL or not RESEARCH_WEBHOOK_URL or not UNIVERSITY_WEBHOOK_URL:
+    logger.error("Missing required environment variables: WEBHOOK_URL, AIRTABLE_URL, RESEARCH_WEBHOOK_URL, or UNIVERSITY_WEBHOOK_URL")
     sys.exit(1)
+
 
 # Set up directories (adjust as needed)
 BASE_DIR = os.path.join(os.getcwd(), "job_data")
@@ -46,6 +60,7 @@ os.makedirs(CSV_DIR, exist_ok=True)
 
 # Target companies to filter for (including TikTok)
 
+#TARGET_COMPANIES = ["Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper", "Yahoo", "Tesla", "Nvidia", "Hyundai", "Deloitte", "PwC", "EY", "KPMG", "Goldman Sachs", "The Walt Disney Company", "Wells Fargo", "McKinsey & Company", "Riot Games", "Tinder", "DISQO", "GumGum", "MySpace", "Telesign", "PeerStreet", "Escape Communications", "Push Media", "Quantum Dimension", "Robin Labs", "Southbay", "The White Rabbit Entertainment", "Rubicon Project", "TaskUs", "AssetAvenue", "Clutter"]
 TARGET_COMPANIES = [
     "Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper", "Yahoo", "Tesla", "Nvidia",
     "Hyundai", "Deloitte", "PwC", "EY", "KPMG", "Goldman Sachs", "The Walt Disney Company", "Wells Fargo",
@@ -95,7 +110,9 @@ def load_job_history():
                 data = json.load(f)
                 # Convert list to set if it exists, otherwise create empty set
                 data["seen_jobs"] = set(data.get("seen_jobs", []))
+                logger.info(f"Loaded {len(data['seen_jobs'])} previously seen jobs from history")
                 return data
+        logger.info("No job history found, starting fresh")
         return {"seen_jobs": set()}
     except Exception as e:
         logger.error(f"Error loading job history: {e}")
@@ -107,14 +124,17 @@ def save_job_history(history):
         history["seen_jobs"] = list(history.get("seen_jobs", set()))
         with open(HISTORY_FILE, 'w') as f:
             json.dump(history, f)
+        logger.info(f"Saved {len(history['seen_jobs'])} jobs to history")
     except Exception as e:
         logger.error(f"Error saving job history: {e}")
 
 def is_new_job(job, history):
     job_key = f"{job['Company']}_{job['Position Title']}"
     if job_key not in history["seen_jobs"]:
-        history["seen_jobs"].add(job_key)  # Use add() for sets instead of append()
+        history["seen_jobs"].add(job_key)
+        logger.info(f"Found new job: {job['Company']} - {job['Position Title']}")
         return True
+    logger.debug(f"Skipping already seen job: {job['Company']} - {job['Position Title']}")
     return False
 
 def setup_driver():
@@ -163,133 +183,179 @@ def save_filtered_jobs_to_excel(df):
     except Exception as e:
         logger.error(f"Error saving filtered jobs to Excel: {e}")
 
+import pytz  # Make sure this is at the top of your file
+
 def filter_jobs(csv_path):
-    """Filter jobs based on target companies and today's date in LA timezone, then save filtered data."""
     try:
         df = pd.read_csv(csv_path)
-
-        logger.info("CSV Structure:")
-        logger.info(f"Columns: {list(df.columns)}")
-        logger.info(f"Number of rows: {len(df)}")
-
-        # Convert 'Date' column to datetime
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        logger.info("Converted 'Date' column to datetime.")
-        logger.info(f"Earliest date in data: {df['Date'].min()}")
-        logger.info(f"Latest date in data: {df['Date'].max()}")
-
-        # Use Los Angeles local date
-        la_tz = pytz.timezone("America/Los_Angeles")
-        today = datetime.now(la_tz).date()
-
-        # Filter out rows with invalid dates
         df = df[df['Date'].notna()]
-        df['OnlyDate'] = df['Date'].dt.date
-
+        df['OnlyDate'] = df['Date'].dt.normalize()
+        today = pd.Timestamp(datetime.now().date())
         company_pattern = '|'.join(map(re.escape, TARGET_COMPANIES))
 
-        filtered_df = df[
-            (df['Company'].str.contains(company_pattern, case=False, na=False)) &
+        # Filter jobs for target companies posted today
+        company_df = df[
+            df['Company'].str.contains(company_pattern, case=False, na=False) &
             (df['OnlyDate'] == today)
         ]
 
-        logger.info("\nFiltering Results:")
-        logger.info(f"Total jobs before filtering: {len(df)}")
-        logger.info(f"Jobs from target companies: {len(df[df['Company'].str.contains(company_pattern, case=False, na=False)])}")
-        logger.info(f"Jobs from today: {len(df[df['OnlyDate'] == today])}")
-        logger.info(f"Final filtered jobs: {len(filtered_df)}")
+        # Filter researcher jobs
+        researcher_df = df[
+            df['Position Title'].str.contains('researcher', case=False, na=False)
+        ]
 
-        if not filtered_df.empty:
-            logger.info("\nFiltered Jobs:")
-            logger.info(filtered_df[['Company', 'Position Title', 'Date']].to_string())
-            save_filtered_jobs_to_excel(filtered_df)
+        # Filter university jobs
+        university_df = df[
+            df['Company'].str.contains('university', case=False, na=False)
+        ]
 
-        filtered_csv_path = csv_path.replace('.csv', '_filtered.csv')
-        filtered_df.to_csv(filtered_csv_path, index=False)
-        logger.info(f"Filtered jobs saved to: {filtered_csv_path}")
+        # Exclude university jobs from researcher_df
+        non_university_researcher_df = researcher_df[
+            ~researcher_df['Company'].str.contains('university', case=False, na=False)
+        ]
 
-        return filtered_csv_path if not filtered_df.empty else None
+        researcher_combined_df = non_university_researcher_df
+
+        logger.info(f"Target company jobs today: {len(company_df)}")
+        logger.info(f"'Researcher' jobs (non-university): {len(researcher_combined_df)}")
+        logger.info(f"University jobs found: {len(university_df)}")
+
+        # Prepare output CSV paths
+        company_csv = csv_path.replace('.csv', '_filtered_companies.csv')
+        researcher_csv = csv_path.replace('.csv', '_filtered_researchers.csv')
+        university_csv = csv_path.replace('.csv', '_filtered_universities.csv')
+
+        # Save CSVs
+        if not company_df.empty:
+            company_df.to_csv(company_csv, index=False)
+        if not researcher_combined_df.empty:
+            researcher_combined_df.to_csv(researcher_csv, index=False)
+        if not university_df.empty:
+            university_df.to_csv(university_csv, index=False)
+
+        # Save combined Excel
+        combined_df = pd.concat([company_df, researcher_combined_df, university_df]).drop_duplicates()
+        if not combined_df.empty:
+            save_filtered_jobs_to_excel(combined_df)
+
+        return (
+            company_csv if not company_df.empty else None,
+            researcher_csv if not researcher_combined_df.empty else None,
+            university_csv if not university_df.empty else None
+        )
 
     except Exception as e:
         logger.error(f"Error filtering jobs: {e}")
-        return None
-
-def send_csv_to_discord(csv_path):
+        return None, None, None
+        
+def log_sent_jobs(jobs):
     try:
-        if not WEBHOOK_URL:
-            logger.error("Webhook URL is empty")
+        os.makedirs(BASE_DIR, exist_ok=True)  # Make sure the folder exists
+        if not os.path.exists(LOGGED_JOBS_FILE):
+            with open(LOGGED_JOBS_FILE, "w") as f:
+                f.write("Position Title | Company | Date\n")  # Header for first-time file
+
+        with open(LOGGED_JOBS_FILE, "a") as f:
+            for job in jobs:
+                date_str = pd.to_datetime(job['Date'], errors='coerce')
+                if pd.isna(date_str):
+                    date_str = "Unknown"
+                else:
+                    date_str = date_str.strftime('%Y-%m-%d')
+                f.write(f"{job['Position Title']} | {job['Company']} | {date_str}\n")
+    except Exception as e:
+        logger.error(f"Error logging sent jobs: {e}")
+
+
+def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
+    try:
+        if not webhook_url:
+            logger.error(f"Webhook URL is empty for {label}")
             return False
 
-        if not WEBHOOK_URL.startswith('http'):
-            logger.error("Invalid webhook URL format")
+        if not webhook_url.startswith('http'):
+            logger.error(f"Invalid webhook URL format for {label}")
             return False
 
-        # Load the CSV file into a DataFrame
-        df = pd.read_csv(csv_path)
-
-        # Convert 'Date' column to datetime, coercing errors to NaT
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-
-        # Load job history and identify new jobs
+        # Load job history at the start
         history = load_job_history()
-        new_jobs = [job for _, job in df.iterrows() if is_new_job(job, history)]
-        save_job_history(history)
+        logger.info(f"Checking {label} against {len(history['seen_jobs'])} previously seen jobs")
 
+        df = pd.read_csv(csv_path)
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        
+        # Filter for new jobs
+        new_jobs = [job for _, job in df.iterrows() if is_new_job(job, history)]
+        
         if not new_jobs:
-            logger.info("No new job openings found for today from target companies.")
+            logger.info(f"No new {label.lower()} found.")
             return True
 
-        logger.info(f"Found {len(new_jobs)} new jobs to send to Discord")
+        logger.info(f"Found {len(new_jobs)} new {label.lower()} to send to Discord")
 
-        # Prepare the message header
-        header = f"🎯 **New Job Openings from Target Companies** ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
-        message = header
+        base_time = datetime.now().strftime('%Y-%m-%d %H:%M')
+        messages = []
+        current_msg = f"🎯 **{label}** ({base_time})\n\n"
 
         for job in new_jobs:
-            job_info = (
+            job_text = (
                 f"**Company:** {job['Company']}\n"
                 f"**Position:** {job['Position Title']}\n"
                 f"**Apply:** {job['Apply']}\n"
                 "-------------------\n\n"
             )
+            if len(current_msg) + len(job_text) > 1900:
+                messages.append(current_msg)
+                current_msg = ""
+            current_msg += job_text
 
-            # Check if adding the next job exceeds Discord's 2000-character limit
-            if len(message) + len(job_info) > 1900:
-                # Send the current message and start a new one
-                if not send_message_to_discord(message):
-                    return False
-                message = header + job_info
+        if current_msg:
+            messages.append(current_msg)
+
+        success = True
+        for idx, msg in enumerate(messages):
+            payload = {
+                "content": msg,
+                "username": "Job Scraper Bot",
+                "avatar_url": "https://i.imgur.com/4M34hi2.png"
+            }
+            response = requests.post(webhook_url, json=payload)
+
+            if response.status_code in [200, 204]:  # Both are success codes
+                logger.info(f"Successfully sent part {idx + 1} to Discord (label: {label})")
             else:
-                # Add the job info to the current message
-                message += job_info
+                logger.error(f"Failed to send part {idx + 1} to Discord (label: {label}). Status code: {response.status_code}")
+                logger.error(f"Response content: {response.text}")
+                success = False
 
-        # Send any remaining message content
-        if message.strip():
-            if not send_message_to_discord(message):
-                return False
+            time.sleep(1)
 
-        logger.info("Successfully sent all job openings to Discord")
+        if success:
+            try:
+                # Save to job history
+                logger.info(f"Saving {len(new_jobs)} new jobs to history file")
+                save_job_history(history)
+                
+                # Log sent jobs to text file
+                logger.info(f"Logging {len(new_jobs)} sent jobs to {LOGGED_JOBS_FILE}")
+                log_sent_jobs(new_jobs)
+                
+                logger.info(f"Successfully sent all {label.lower()} to Discord and updated both history files")
+            except Exception as e:
+                logger.error(f"Error saving job history or logging sent jobs: {e}")
+                # Don't return False here as the Discord messages were sent successfully
+        else:
+            logger.error(f"Failed to send all {label.lower()} to Discord, not updating history")
+            return False
+
         return True
 
     except Exception as e:
-        logger.error(f"Error sending to Discord: {e}")
+        logger.error(f"Error sending {label.lower()} to Discord: {e}")
         return False
 
-def send_message_to_discord(message):
-    """Helper function to send a message to Discord."""
-    payload = {
-        "content": message,
-        "username": "Job Scraper Bot",
-        "avatar_url": "https://i.imgur.com/4M34hi2.png"
-    }
-    response = requests.post(WEBHOOK_URL, json=payload)
-    if response.status_code in [200, 204]:  # Both 200 and 204 are success codes
-        logger.info("Successfully sent message to Discord")
-        return True
-    else:
-        logger.error(f"Failed to send to Discord. Status code: {response.status_code}")
-        logger.error(f"Response content: {response.text}")
-        return False
+
 
 def download_airtable_csv(driver):
     try:
@@ -334,15 +400,20 @@ def main():
             logger.error("No CSV file found after download; aborting.")
             return
 
-        filtered_csv_path = filter_jobs(csv_path)
-        if not filtered_csv_path:
-            logger.error("Filtering failed; aborting.")
+        company_csv, researcher_csv, university_csv = filter_jobs(csv_path)
+
+        if not company_csv and not researcher_csv and not university_csv:
+            logger.error("No relevant jobs found; aborting.")
             return
 
-        if send_csv_to_discord(filtered_csv_path):
-            logger.info("Notification sent successfully")
-        else:
-            logger.error("Failed to send notification to Discord")
+        if company_csv:
+            send_csv_to_discord(company_csv, WEBHOOK_URL, label="Target Company Jobs")
+
+        if researcher_csv:
+            send_csv_to_discord(researcher_csv, RESEARCH_WEBHOOK_URL, label="Researcher Jobs")
+
+        if university_csv:
+            send_csv_to_discord(university_csv, UNIVERSITY_WEBHOOK_URL, label="University Jobs")
 
         try:
             os.remove(csv_path)
@@ -355,6 +426,7 @@ def main():
         logger.error(f"Error in main execution: {e}")
         raise
 
+
+
 if __name__ == "__main__":
     main()
-
