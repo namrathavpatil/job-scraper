@@ -41,7 +41,7 @@ os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(CSV_DIR, exist_ok=True)
 
 # Target companies to filter for (including TikTok)
-TARGET_COMPANIES = ["Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper"]
+TARGET_COMPANIES = ["Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper", "Yahoo","Tesla", "Nvidia", "Hyndai"]
 
 # ---------------- Helper Functions ----------------
 
