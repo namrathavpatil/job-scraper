@@ -122,7 +122,8 @@ def save_filtered_jobs_to_excel(df):
 import pytz  # Make sure this is at the top of your file
 
 def filter_jobs(csv_path):
-    """Filter jobs based on target companies and today's date in LA timezone, then save filtered data."""
+    """Filter jobs based on target companies and today's date in LA timezone, 
+    and include jobs with 'researcher' in position title."""
     try:
         df = pd.read_csv(csv_path)
 
@@ -132,30 +133,30 @@ def filter_jobs(csv_path):
         logger.info("\nSample of data:")
         logger.info(df.head())
 
-        # Convert 'Date' column to datetime
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        logger.info("Converted 'Date' column to datetime.")
-        logger.info("First 10 non-null dates:")
-        logger.info(df['Date'].dropna().head(10))
-        logger.info(f"Earliest date in data: {df['Date'].min()}")
-        logger.info(f"Latest date in data: {df['Date'].max()}")
-
-        # Use Los Angeles local date
         la_tz = pytz.timezone("America/Los_Angeles")
         today = datetime.now(la_tz).date()
 
         company_pattern = '|'.join(map(re.escape, TARGET_COMPANIES))
 
-        filtered_df = df[
+        # Target jobs from companies and posted today
+        company_filter = df[
             (df['Company'].str.contains(company_pattern, case=False, na=False)) &
             (df['Date'].dt.date == today)
         ]
 
+        # 🔍 Also get jobs with "researcher" in title (case-insensitive), even if company not in list
+        researcher_jobs = df[
+            df['Position Title'].str.contains("researcher", case=False, na=False)
+        ]
+
+        # Combine both (avoid duplicates)
+        filtered_df = pd.concat([company_filter, researcher_jobs]).drop_duplicates()
+
         logger.info("\nFiltering Results:")
-        logger.info(f"Total jobs before filtering: {len(df)}")
-        logger.info(f"Jobs from target companies: {len(df[df['Company'].str.contains(company_pattern, case=False, na=False)])}")
-        logger.info(f"Jobs from today: {len(df[df['Date'].dt.date == today])}")
-        logger.info(f"Final filtered jobs: {len(filtered_df)}")
+        logger.info(f"Jobs from target companies today: {len(company_filter)}")
+        logger.info(f"Jobs with 'researcher' in title: {len(researcher_jobs)}")
+        logger.info(f"Final combined filtered jobs: {len(filtered_df)}")
 
         if not filtered_df.empty:
             logger.info("\nFiltered Jobs:")
@@ -171,9 +172,6 @@ def filter_jobs(csv_path):
     except Exception as e:
         logger.error(f"Error filtering jobs: {e}")
         return None
-
-
-
 
 def send_csv_to_discord(csv_path):
     try:
