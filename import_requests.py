@@ -384,9 +384,10 @@ def main():
 
         company_csv, researcher_csv, university_csv = filter_jobs(csv_path)
 
-        if not company_csv and not researcher_csv and not university_csv:
+        if company_csv.empty and researcher_csv.empty and university_csv.empty:
             logger.error("No relevant jobs found; aborting.")
             return
+
 
         if company_csv:
             send_csv_to_discord(company_csv, WEBHOOK_URL, label="Target Company Jobs")
