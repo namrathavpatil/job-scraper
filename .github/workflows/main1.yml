@@ -27,19 +27,23 @@ jobs:
       
       - name: Install ChromeDriver
         run: |
-          # Debug: print Chrome version output
+          # Print the Chrome version for debugging
           echo "Running: google-chrome-stable --version"
           google-chrome-stable --version
           
-          # Get Chrome version and extract the first three numeric parts
+          # Get Chrome version and extract three-part version
           CHROME_VERSION=$(google-chrome-stable --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
           echo "CHROME_VERSION: $CHROME_VERSION"
           
-          # Use the major.minor version for lookup
-          CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION%.*}")
+          # Extract the major version (e.g., "134")
+          MAJOR_VERSION=${CHROME_VERSION%%.*}
+          echo "MAJOR_VERSION: $MAJOR_VERSION"
+          
+          # Use the major version to get the correct ChromeDriver version
+          CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${MAJOR_VERSION}")
           echo "CHROMEDRIVER_VERSION: $CHROMEDRIVER_VERSION"
           
-          # Download ChromeDriver
+          # Download and install ChromeDriver
           wget -q "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip"
           unzip chromedriver_linux64.zip
           chmod +x chromedriver
