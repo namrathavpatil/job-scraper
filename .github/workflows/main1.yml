@@ -31,8 +31,8 @@ jobs:
           echo "Running: google-chrome-stable --version"
           google-chrome-stable --version
           
-          # Hardcode the ChromeDriver version (adjust as needed)
-          CHROMEDRIVER_VERSION="134.0.0.0"
+          # Hardcode a known valid ChromeDriver version for Chrome 134
+          CHROMEDRIVER_VERSION="134.0.5735.90"
           echo "Using CHROMEDRIVER_VERSION: $CHROMEDRIVER_VERSION"
           
           # Download ChromeDriver using the hardcoded version
