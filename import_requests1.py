@@ -54,7 +54,9 @@ BASE_DIR = os.path.join(os.getcwd(), "job_data")
 CSV_DIR = os.path.join(BASE_DIR, "csv_files")
 HISTORY_FILE = os.path.join(BASE_DIR, "job_history.json")
 FILTERED_EXCEL = os.path.join(BASE_DIR, "filtered_jobs.xlsx")
+LOGGED_JOBS_FILE = os.path.join(BASE_DIR, "jobs_sent_to_discord.txt")
 
+# Create directories if they don't exist
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(CSV_DIR, exist_ok=True)
 
@@ -103,20 +105,46 @@ TARGET_COMPANIES = [
 
 # ---------------- Helper Functions ----------------
 
-def load_job_history():
+
+def log_sent_jobs(jobs):
     try:
-        if os.path.exists(HISTORY_FILE):
-            with open(HISTORY_FILE, 'r') as f:
-                data = json.load(f)
-                # Convert list to set if it exists, otherwise create empty set
-                data["seen_jobs"] = set(data.get("seen_jobs", []))
-                logger.info(f"Loaded {len(data['seen_jobs'])} previously seen jobs from history")
-                return data
-        logger.info("No job history found, starting fresh")
-        return {"seen_jobs": set()}
+        os.makedirs(BASE_DIR, exist_ok=True)  # Make sure the folder exists
+        if not os.path.exists(LOGGED_JOBS_FILE):
+            with open(LOGGED_JOBS_FILE, "w") as f:
+                f.write("Position Title | Company | Date\n")  # Header for first-time file
+
+        with open(LOGGED_JOBS_FILE, "a") as f:
+            for job in jobs:
+                date_str = pd.to_datetime(job['Date'], errors='coerce')
+                if pd.isna(date_str):
+                    date_str = "Unknown"
+                else:
+                    date_str = date_str.strftime('%Y-%m-%d')
+                f.write(f"{job['Position Title']} | {job['Company']} | {date_str}\n")
     except Exception as e:
-        logger.error(f"Error loading job history: {e}")
-        return {"seen_jobs": set()}
+        logger.error(f"Error logging sent jobs: {e}")
+
+def save_job_history(history):
+    try:
+        # Convert set to list before saving
+        history["seen_jobs"] = list(history.get("seen_jobs", set()))
+        with open(HISTORY_FILE, 'w') as f:
+            json.dump(history, f)
+        logger.info(f"Saved {len(history['seen_jobs'])} jobs to history")
+        
+        # If running in GitHub Actions, commit the changes
+        if os.getenv('GITHUB_ACTIONS'):
+            try:
+                os.system('git config --global user.name "github-actions"')
+                os.system('git config --global user.email "actions@github.com"')
+                os.system(f'git add {HISTORY_FILE}')
+                os.system('git commit -m "Update job history" || echo "No changes to commit"')
+                os.system('git push')
+                logger.info("Committed job history changes to repository")
+            except Exception as e:
+                logger.error(f"Error committing job history: {e}")
+    except Exception as e:
+        logger.error(f"Error saving job history: {e}")
 
 def save_job_history(history):
     try:
