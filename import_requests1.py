@@ -24,14 +24,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration from environment variables
-WEBHOOK_URL = os.getenv('WEBHOOK_URL1')
+WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 
 
-webhook_url = os.getenv('WEBHOOK_URL1')
-if webhook_url is None:
-    print("WEBHOOK_URL1 is not set.")
 
-AIRTABLE_URL = os.getenv('AIRTABLE_URL1')
+
+AIRTABLE_URL = os.getenv('AIRTABLE_URL')
 if not WEBHOOK_URL or not AIRTABLE_URL:
     logger.error("Missing required environment variables: WEBHOOK_URL or AIRTABLE_URL")
     sys.exit(1)
