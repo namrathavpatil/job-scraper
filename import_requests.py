@@ -97,15 +97,17 @@ def load_job_history():
         if os.path.exists(HISTORY_FILE):
             with open(HISTORY_FILE, 'r') as f:
                 data = json.load(f)
+                # Convert list to set if it exists, otherwise create empty set
                 data["seen_jobs"] = set(data.get("seen_jobs", []))
                 return data
-        return {"seen_jobs": []}
+        return {"seen_jobs": set()}
     except Exception as e:
         logger.error(f"Error loading job history: {e}")
-        return {"seen_jobs": []}
+        return {"seen_jobs": set()}
 
 def save_job_history(history):
     try:
+        # Convert set to list before saving
         history["seen_jobs"] = list(history.get("seen_jobs", set()))
         with open(HISTORY_FILE, 'w') as f:
             json.dump(history, f)
@@ -115,7 +117,7 @@ def save_job_history(history):
 def is_new_job(job, history):
     job_key = f"{job['Company']}_{job['Position Title']}"
     if job_key not in history["seen_jobs"]:
-        history["seen_jobs"].append(job_key)
+        history["seen_jobs"].add(job_key)  # Use add() for sets instead of append()
         return True
     return False
 
@@ -231,8 +233,17 @@ def filter_jobs(csv_path):
     except Exception as e:
         logger.error(f"Error filtering jobs: {e}")
         return None, None
+
 def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
     try:
+        if not webhook_url:
+            logger.error(f"Webhook URL is empty for {label}")
+            return False
+
+        if not webhook_url.startswith('http'):
+            logger.error(f"Invalid webhook URL format for {label}")
+            return False
+
         df = pd.read_csv(csv_path)
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         history = load_job_history()
@@ -241,7 +252,7 @@ def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
 
         if not new_jobs:
             logger.info(f"No new {label.lower()} found.")
-            return
+            return True
 
         base_time = datetime.now().strftime('%Y-%m-%d %H:%M')
         messages = []
@@ -269,7 +280,7 @@ def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
                 "avatar_url": "https://i.imgur.com/4M34hi2.png"
             }
             response = requests.post(webhook_url, json=payload)
-            if response.status_code != 200:
+            if response.status_code not in [200, 204]:  # 204 is actually a success code
                 logger.error(f"Failed to send part {idx + 1} to Discord (label: {label}). Status code: {response.status_code}")
                 logger.error(f"Response content: {response.text}")
                 return False
