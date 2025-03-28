@@ -15,6 +15,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import sys
+from database import JobDatabase
 
 # Set up logging
 logging.basicConfig(
@@ -36,12 +37,14 @@ if not WEBHOOK_URL or not AIRTABLE_URL or not RESEARCH_WEBHOOK_URL or not UNIVER
 # Set up directories (adjust as needed)
 BASE_DIR = os.path.join(os.getcwd(), "job_data")
 CSV_DIR = os.path.join(BASE_DIR, "csv_files")
-HISTORY_FILE = os.path.join(BASE_DIR, "job_history.json")
 FILTERED_EXCEL = os.path.join(BASE_DIR, "filtered_jobs.xlsx")
 
 # Create directories if they don't exist
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(CSV_DIR, exist_ok=True)
+
+# Initialize database
+db = JobDatabase()
 
 # Target companies to filter for (including TikTok)
 
@@ -120,14 +123,18 @@ def save_job_history(history):
     except Exception as e:
         logger.error(f"Error saving job history: {e}")
 
-def is_new_job(job, history):
-    job_key = f"{job['Company']}_{job['Position Title']}"
-    if job_key not in history["seen_jobs"]:
-        history["seen_jobs"].add(job_key)
-        logger.info(f"Found new job: {job['Company']} - {job['Position Title']}")
-        return True
-    logger.debug(f"Skipping already seen job: {job['Company']} - {job['Position Title']}")
-    return False
+def is_new_job(job):
+    """Check if a job is new using the database."""
+    return not db.is_job_seen(job['Company'], job['Position Title'])
+
+def mark_job_seen(job):
+    """Mark a job as seen in the database."""
+    return db.mark_job_seen(
+        company=job['Company'],
+        position_title=job['Position Title'],
+        apply_url=job.get('Apply'),
+        date_posted=job.get('Date')
+    )
 
 def setup_driver():
     chrome_options = Options()
@@ -263,15 +270,11 @@ def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
             logger.error(f"Invalid webhook URL format for {label}")
             return False
 
-        # Load job history at the start
-        history = load_job_history()
-        logger.info(f"Checking {label} against {len(history['seen_jobs'])} previously seen jobs")
-
         df = pd.read_csv(csv_path)
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         
-        # Filter for new jobs
-        new_jobs = [job for _, job in df.iterrows() if is_new_job(job, history)]
+        # Filter for new jobs using database
+        new_jobs = [job for _, job in df.iterrows() if is_new_job(job)]
         
         if not new_jobs:
             logger.info(f"No new {label.lower()} found.")
@@ -317,16 +320,12 @@ def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
             time.sleep(1)
 
         if success:
-            try:
-                # Save to job history
-                logger.info(f"Saving {len(new_jobs)} new jobs to history file")
-                save_job_history(history)
-                logger.info(f"Successfully sent all {label.lower()} to Discord and updated history")
-            except Exception as e:
-                logger.error(f"Error saving job history: {e}")
-                # Don't return False here as the Discord messages were sent successfully
+            # Mark all jobs as seen in database
+            for job in new_jobs:
+                mark_job_seen(job)
+            logger.info(f"Successfully sent all {label.lower()} to Discord and updated database")
         else:
-            logger.error(f"Failed to send all {label.lower()} to Discord, not updating history")
+            logger.error(f"Failed to send all {label.lower()} to Discord, not updating database")
             return False
 
         return True
@@ -371,18 +370,8 @@ def main():
     try:
         logger.info("Starting job scraping process...")
         
-        # If running in GitHub Actions, try to load history from artifacts
-        if os.getenv('GITHUB_ACTIONS'):
-            artifact_path = os.path.join(os.getcwd(), "job_history.json")
-            if os.path.exists(artifact_path):
-                try:
-                    with open(artifact_path, 'r') as f:
-                        data = json.load(f)
-                        with open(HISTORY_FILE, 'w') as f2:
-                            json.dump(data, f2)
-                    logger.info("Loaded job history from GitHub Actions artifacts")
-                except Exception as e:
-                    logger.error(f"Error loading history from artifacts: {e}")
+        # Clean up old jobs from database
+        db.cleanup_old_jobs(days=30)
         
         cleanup_old_csvs()
         driver = setup_driver()
