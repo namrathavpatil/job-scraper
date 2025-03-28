@@ -313,67 +313,55 @@ def save_filtered_jobs_to_excel(df):
 
 def filter_jobs(csv_path):
     try:
-        # Load the CSV file into a DataFrame
         df = pd.read_csv(csv_path)
-
-        # Convert 'Date' column to datetime, coercing errors to NaT
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-
-        # Filter out rows with invalid dates
         df = df[df['Date'].notna()]
-
-        # Extract only the date part
         df['OnlyDate'] = df['Date'].dt.normalize()
-
-        # Get today's date
         today = pd.Timestamp(datetime.now().date())
-
-        # Compile regex pattern for target companies
         company_pattern = '|'.join(map(re.escape, TARGET_COMPANIES))
 
-        # Filter jobs for target companies posted today
         company_df = df[
             df['Company'].str.contains(company_pattern, case=False, na=False) &
             (df['OnlyDate'] == today)
         ]
-
-        # Filter researcher jobs
         researcher_df = df[
             df['Position Title'].str.contains('researcher', case=False, na=False)
         ]
-
-        # Filter university jobs
         university_df = df[
             df['Company'].str.contains('university', case=False, na=False)
         ]
-
-        # Exclude university jobs from researcher_df
         non_university_researcher_df = researcher_df[
             ~researcher_df['Company'].str.contains('university', case=False, na=False)
         ]
 
-        researcher_combined_df = non_university_researcher_df
+        # Save filtered CSVs and return file paths
+        def save_df(df, suffix):
+            if df.empty:
+                return None
+            out_path = csv_path.replace(".csv", f"_{suffix}.csv")
+            df.to_csv(out_path, index=False)
+            return out_path
 
-        logger.info(f"Target company jobs today: {len(company_df)}")
-        logger.info(f"'Researcher' jobs found: {len(researcher_df)}")
-        logger.info(f"'Researcher' jobs (non-university): {len(researcher_combined_df)}")
-        logger.info(f"University jobs found: {len(university_df)}")
+        company_path = save_df(company_df, "companies")
+        researcher_path = save_df(non_university_researcher_df, "researchers")
+        university_path = save_df(university_df, "universities")
 
-        # Save combined Excel
-        combined_df = pd.concat([company_df, researcher_combined_df, university_df]).drop_duplicates()
+        combined_df = pd.concat([company_df, non_university_researcher_df, university_df]).drop_duplicates()
         if not combined_df.empty:
             save_filtered_jobs_to_excel(combined_df)
 
-        return company_df, researcher_combined_df, university_df
+        return company_path, researcher_path, university_path
 
     except Exception as e:
         logger.error(f"Error filtering jobs: {e}")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return None, None, None
 
 def main():
     try:
         logger.info("Starting job scraping process...")
         cleanup_old_csvs()
+
+        # Launch browser and download Airtable CSV
         driver = setup_driver()
         csv_path = download_airtable_csv(driver)
         driver.quit()
@@ -382,33 +370,36 @@ def main():
             logger.error("No CSV file found after download; aborting.")
             return
 
+        # Filter and save to separate CSVs — returns file paths
         company_csv, researcher_csv, university_csv = filter_jobs(csv_path)
 
-        # Correctly check if all DataFrames are empty
-        if company_csv.empty and researcher_csv.empty and university_csv.empty:
+        # If all are None, there's nothing new to send
+        if company_csv is None and researcher_csv is None and university_csv is None:
             logger.error("No relevant jobs found; aborting.")
             return
 
-        # Send to appropriate Discord webhooks only if DataFrame is NOT empty
-        if not company_csv.empty:
+        # Send each non-empty filtered CSV to the appropriate Discord webhook
+        if company_csv is not None:
             send_csv_to_discord(company_csv, WEBHOOK_URL, label="Target Company Jobs")
 
-        if not researcher_csv.empty:
+        if researcher_csv is not None:
             send_csv_to_discord(researcher_csv, RESEARCH_WEBHOOK_URL, label="Researcher Jobs")
 
-        if not university_csv.empty:
+        if university_csv is not None:
             send_csv_to_discord(university_csv, UNIVERSITY_WEBHOOK_URL, label="University Jobs")
 
+        # Clean up the original downloaded CSV
         try:
             os.remove(csv_path)
             logger.info("Removed downloaded CSV file after processing.")
         except Exception as e:
             logger.error(f"Error removing CSV file: {e}")
 
-        logger.info("Job scraping process completed")
+        logger.info("Job scraping process completed successfully.")
     except Exception as e:
         logger.error(f"Error in main execution: {e}")
         raise
+
 
 
 if __name__ == "__main__":
