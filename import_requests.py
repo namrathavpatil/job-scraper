@@ -49,7 +49,46 @@ os.makedirs(CSV_DIR, exist_ok=True)
 
 # Target companies to filter for (including TikTok)
 
-TARGET_COMPANIES = ["Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper", "Yahoo", "Tesla", "Nvidia", "Hyundai", "Deloitte", "PwC", "EY", "KPMG", "Goldman Sachs", "The Walt Disney Company", "Wells Fargo", "McKinsey & Company", "Riot Games", "Tinder", "DISQO", "GumGum", "MySpace", "Telesign", "PeerStreet", "Escape Communications", "Push Media", "Quantum Dimension", "Robin Labs", "Southbay", "The White Rabbit Entertainment", "Rubicon Project", "TaskUs", "AssetAvenue", "Clutter"]
+#TARGET_COMPANIES = ["Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper", "Yahoo", "Tesla", "Nvidia", "Hyundai", "Deloitte", "PwC", "EY", "KPMG", "Goldman Sachs", "The Walt Disney Company", "Wells Fargo", "McKinsey & Company", "Riot Games", "Tinder", "DISQO", "GumGum", "MySpace", "Telesign", "PeerStreet", "Escape Communications", "Push Media", "Quantum Dimension", "Robin Labs", "Southbay", "The White Rabbit Entertainment", "Rubicon Project", "TaskUs", "AssetAvenue", "Clutter"]
+TARGET_COMPANIES = [
+    "Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper", "Yahoo", "Tesla", "Nvidia",
+    "Hyundai", "Deloitte", "PwC", "EY", "KPMG", "Goldman Sachs", "The Walt Disney Company", "Wells Fargo",
+    "McKinsey & Company", "Riot Games", "Tinder", "DISQO", "GumGum", "MySpace", "Telesign", "PeerStreet",
+    "Escape Communications", "Push Media", "Quantum Dimension", "Robin Labs", "Southbay", "The White Rabbit Entertainment",
+    "Rubicon Project", "TaskUs", "AssetAvenue", "Clutter", "Intel", "Samsung", "Qualcomm", "AMD", "LiveRamp",
+    "Red Hat", "Ciena", "Acadaca", "TP-Link", "CoBank", "Intermountain Health", "Hexagon Manufacturing Intelligence",
+    "North Carolina State University", "ProbablyMonsters", "Western Digital", "Boise State University", "TabaPay",
+    "The New York Times", "Wolters Kluwer", "Siemens Healthineers", "Cboe Global Markets", "Exelon", "Medtronic",
+    "Collins Aerospace", "General Dynamics Information Technology", "General Atomics", "Walgreens", "Delmarva Power",
+    "CGI", "Midland Credit Management", "Fiserv", "Capital One", "Teledyne Technologies Incorporated", "ByteDance",
+    "Haas Automation, Inc.", "SpaceX", "Tatari", "Aspen Technology", "Vertafore", "Mission Technologies",
+    "Palantir Technologies", "Adobe", "Medpace", "Mastercard", "Rambus", "The Reynolds and Reynolds Company",
+    "Boeing", "Analog Devices", "Northrop Grumman", "Patterson Companies, Inc.", "Piper Companies", "Aperia Technologies",
+    "Galaxy", "Costco Wholesale", "Texas A&M Engineering Experiment Station (TEES)", "Moffatt & Nichol", "Quick Quack Car Wash",
+    "KLA", "Lockheed Martin", "University of Maryland Medical System", "Belvedere Trading, LLC", "Casey's",
+    "The University of Texas at Austin", "Daimler Truck North America", "Texas A&M University", "Coalition, Inc.",
+    "Delta Solutions and Strategies", "Ennoble First Inc.", "FloQast", "Spring Health", "American Family Insurance",
+    "Resideo", "Freddie Mac", "NetSuite", "Virginia Commonwealth University", "AMEWAS, Inc.", "Esri", "Stanford Health Care",
+    "Prime Healthcare", "Leonardo DRS", "Wizards of the Coast", "Ancestry", "General Atomics Aeronautical Systems",
+    "Federal Signal Corporation", "Afficiency", "Amazon Web Services (AWS)", "BlackRock", "AppLovin", "Sinch",
+    "Catalent Pharma Solutions", "Splunk", "Field Agent", "Kensho Technologies", "Parsons Corporation", "Nature's Bakery",
+    "Neuralink", "AIG", "Atlassian", "Odoo", "Ascend Analytics", "Sandia National Laboratories", "Blue Origin",
+    "Corpay", "Madiba, Inc.", "TraceGains", "Abbott", "American Electric Power", "Moveworks", "Cognizant", "University of Virginia",
+    "California Highway Patrol", "University of Southern California", "Nidec Motor Corporation", "Austin Community College",
+    "Diversified Services Network, Inc.", "Plexus Corp.", "State of Nebraska", "Experian", "Infinite Campus", "Affirm",
+    "Addepar", "HSA Bank", "Perdue Farms", "CodePath", "Twitch", "Rockstar Games", "HashiCorp", "Peraton", "SquareTrade",
+    "Nintendo", "WOOD Consulting Services, Inc.", "Trillium Health Resources", "Target", "Sierra Nevada Corporation",
+    "Bectran, Inc.", "Walmart", "DoorDash", "eBay", "Airbnb", "Chewy", "Wayfair", "Expedia Group", "Booking Holdings",
+    "Coupang", "Uber Technologies", "Concentrix", "Science Applications International", "Insight Enterprises",
+    "Booz Allen Hamilton Holding", "DXC Technology", "Leidos Holdings", "Kyndryl Holdings", "Cognizant Technology Solutions",
+    "CDW", "IBM", "Motorola Solutions", "Amphenol", "Cisco Systems", "ON Semiconductor", "Microchip Technology",
+    "Sanmina", "KLA", "Lam Research", "Texas Instruments", "Applied Materials", "Micron Technology", "Jabil", "Broadcom",
+    "Advanced Micro Devices", "Analog Devices", "HP Inc.", "Lenovo", "Panasonic", "Accenture", "IBM", "Dell Technologies",
+    "Sony", "Hitachi", "Tencent", "Huawei", "Deutsche Telekom", "Meta", "AT&T", "Alibaba", "Jingdong", "Foxconn",
+    "Samsung Electronics", "Alphabet", "Apple", "Amazon", "Walmart", "UnitedHealth Group", "Berkshire Hathaway",
+    "CVS Health", "ExxonMobil", "McKesson Corporation", "Cencora", "Costco", "JPMorgan Chase", "Cardinal Health",
+    "Chevron Corporation", "Cigna", "Ford Motor Company", "Bank of America", "General Motors", "Elevance Health"
+]
 
 # ---------------- Helper Functions ----------------
 
@@ -130,43 +169,68 @@ import pytz  # Make sure this is at the top of your file
 
 def filter_jobs(csv_path):
     try:
+        # Load the CSV file into a DataFrame
         df = pd.read_csv(csv_path)
+
+        # Convert 'Date' column to datetime, coercing errors to NaT
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+
+        # Filter out rows with invalid dates
         df = df[df['Date'].notna()]
+
+        # Extract only the date part
         df['OnlyDate'] = df['Date'].dt.normalize()
+
+        # Get today's date
         today = pd.Timestamp(datetime.now().date())
 
+        # Compile regex pattern for target companies
         company_pattern = '|'.join(map(re.escape, TARGET_COMPANIES))
 
+        # Filter for target companies with postings today
         company_df = df[
-            (df['Company'].str.contains(company_pattern, case=False, na=False)) &
+            df['Company'].str.contains(company_pattern, case=False, na=False) &
             (df['OnlyDate'] == today)
         ]
 
+        # Filter for positions containing 'researcher'
         researcher_df = df[
             df['Position Title'].str.contains('researcher', case=False, na=False)
         ]
 
+        # Filter for companies with 'university' in their name
+        university_df = df[
+            df['Company'].str.contains('university', case=False, na=False)
+        ]
+
+        # Combine researcher and university DataFrames, removing duplicates
+        researcher_combined_df = pd.concat([researcher_df, university_df]).drop_duplicates()
+
+        # Log the number of jobs found
         logger.info(f"Target company jobs today: {len(company_df)}")
         logger.info(f"'Researcher' jobs found: {len(researcher_df)}")
+        logger.info(f"University jobs found: {len(university_df)}")
 
-        # Save both CSVs
+        # Save the filtered DataFrames to CSV files
         company_csv = csv_path.replace('.csv', '_filtered_companies.csv')
         researcher_csv = csv_path.replace('.csv', '_filtered_researchers.csv')
-        company_df.to_csv(company_csv, index=False)
-        researcher_df.to_csv(researcher_csv, index=False)
 
-        if not company_df.empty or not researcher_df.empty:
-            combined_df = pd.concat([company_df, researcher_df]).drop_duplicates()
+        if not company_df.empty:
+            company_df.to_csv(company_csv, index=False)
+
+        if not researcher_combined_df.empty:
+            researcher_combined_df.to_csv(researcher_csv, index=False)
+
+        # Combine all filtered DataFrames for Excel export
+        combined_df = pd.concat([company_df, researcher_combined_df]).drop_duplicates()
+        if not combined_df.empty:
             save_filtered_jobs_to_excel(combined_df)
 
-        return company_csv if not company_df.empty else None, researcher_csv if not researcher_df.empty else None
+        return company_csv if not company_df.empty else None, researcher_csv if not researcher_combined_df.empty else None
 
     except Exception as e:
         logger.error(f"Error filtering jobs: {e}")
         return None, None
-
-
 def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
     try:
         df = pd.read_csv(csv_path)
