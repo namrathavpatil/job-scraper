@@ -1,17 +1,19 @@
+import os
 import time
 import logging
-import os
+import json
+import re
+import requests
+import pandas as pd
 from datetime import datetime, timedelta
+from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import requests
-import pandas as pd
-import re
-import json
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import sys
 
 # Set up logging
@@ -29,40 +31,45 @@ if not WEBHOOK_URL or not AIRTABLE_URL:
     logger.error("Missing required environment variables: WEBHOOK_URL or AIRTABLE_URL")
     sys.exit(1)
 
-# Set up directories
+# Set up directories (adjust as needed)
 BASE_DIR = os.path.join(os.getcwd(), "job_data")
 CSV_DIR = os.path.join(BASE_DIR, "csv_files")
 HISTORY_FILE = os.path.join(BASE_DIR, "job_history.json")
 FILTERED_EXCEL = os.path.join(BASE_DIR, "filtered_jobs.xlsx")
 
-# Create necessary directories
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(CSV_DIR, exist_ok=True)
 
-# Target companies to filter for
+# Target companies to filter for (including TikTok)
 TARGET_COMPANIES = ["Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper"]
+
+# ---------------- Helper Functions ----------------
 
 def load_job_history():
     """Load the history of previously seen jobs."""
     try:
         if os.path.exists(HISTORY_FILE):
             with open(HISTORY_FILE, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+                data["seen_jobs"] = set(data.get("seen_jobs", []))
+                return data
         return {"seen_jobs": []}
     except Exception as e:
-        logging.error(f"Error loading job history: {e}")
+        logger.error(f"Error loading job history: {e}")
         return {"seen_jobs": []}
 
 def save_job_history(history):
     """Save the job history to file."""
     try:
+        history["seen_jobs"] = list(history.get("seen_jobs", set()))
         with open(HISTORY_FILE, 'w') as f:
             json.dump(history, f)
     except Exception as e:
-        logging.error(f"Error saving job history: {e}")
+        logger.error(f"Error saving job history: {e}")
 
 def is_new_job(job, history):
     """Check if a job is new (not seen before)."""
+    # Assuming the CSV has columns "Company" and "Position Title"
     job_key = f"{job['Company']}_{job['Position Title']}"
     if job_key not in history["seen_jobs"]:
         history["seen_jobs"].append(job_key)
@@ -90,12 +97,10 @@ def setup_driver():
         "browser.helperApps.neverAsk.saveToDisk": "text/csv"
     }
     chrome_options.add_experimental_option("prefs", prefs)
-    
-    # Use system Chrome in cloud environment
-    service = Service('/usr/bin/chromedriver')
-    
     chrome_options.add_argument("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+    # Adjust the Service path if necessary
+    service = Service('/usr/bin/chromedriver')
     return webdriver.Chrome(service=service, options=chrome_options)
 
 def cleanup_old_csvs():
@@ -108,219 +113,185 @@ def cleanup_old_csvs():
             if current_time - file_time > timedelta(hours=1):
                 try:
                     os.remove(file_path)
-                    logging.info(f"Deleted old CSV file: {filename}")
+                    logger.info(f"Deleted old CSV file: {filename}")
                 except Exception as e:
-                    logging.error(f"Error deleting old CSV file {filename}: {e}")
+                    logger.error(f"Error deleting old CSV file {filename}: {e}")
 
 def save_filtered_jobs_to_excel(df):
     """Save filtered jobs to Excel, replacing the previous file."""
     try:
-        # Delete previous Excel file if it exists
         if os.path.exists(FILTERED_EXCEL):
             os.remove(FILTERED_EXCEL)
-            logging.info(f"Deleted previous filtered jobs Excel file: {FILTERED_EXCEL}")
-        
-        # Save new filtered jobs to Excel
+            logger.info(f"Deleted previous filtered jobs Excel file: {FILTERED_EXCEL}")
         df.to_excel(FILTERED_EXCEL, index=False)
-        logging.info(f"Saved filtered jobs to: {FILTERED_EXCEL}")
-        
-        # Log the number of jobs saved
-        logging.info(f"Total jobs saved to Excel: {len(df)}")
-        
+        logger.info(f"Saved filtered jobs to: {FILTERED_EXCEL}")
+        logger.info(f"Total jobs saved to Excel: {len(df)}")
     except Exception as e:
-        logging.error(f"Error saving filtered jobs to Excel: {e}")
+        logger.error(f"Error saving filtered jobs to Excel: {e}")
 
-def filter_jobs(df):
-    """Filter jobs based on target companies and today's date."""
+def filter_jobs(csv_path):
+    """Filter jobs based on target companies and today's date, then save filtered data."""
     try:
-        # Log the structure of the CSV
-        logging.info("CSV Structure:")
-        logging.info(f"Columns: {list(df.columns)}")
-        logging.info(f"Number of rows: {len(df)}")
-        logging.info("\nSample of data:")
-        logging.info(df.head())
+        df = pd.read_csv(csv_path)
+        logger.info("CSV Structure:")
+        logger.info(f"Columns: {list(df.columns)}")
+        logger.info(f"Number of rows: {len(df)}")
+        logger.info("\nSample of data:")
+        logger.info(df.head())
         
-        # Convert date column to datetime
+        # Convert 'Date' column to datetime (adjust column name as needed)
         df['Date'] = pd.to_datetime(df['Date'])
-        
-        # Get today's date
         today = datetime.now().date()
-        
-        # Create a pattern for company matching (case-insensitive)
         company_pattern = '|'.join(map(re.escape, TARGET_COMPANIES))
         
-        # Filter for target companies and today's date
         filtered_df = df[
             (df['Company'].str.contains(company_pattern, case=False, na=False)) &
             (df['Date'].dt.date == today)
         ]
         
-        # Log filtering results
-        logging.info(f"\nFiltering Results:")
-        logging.info(f"Total jobs before filtering: {len(df)}")
-        logging.info(f"Jobs from target companies: {len(df[df['Company'].str.contains(company_pattern, case=False, na=False)])}")
-        logging.info(f"Jobs from today: {len(df[df['Date'].dt.date == today])}")
-        logging.info(f"Final filtered jobs: {len(filtered_df)}")
+        logger.info(f"\nFiltering Results:")
+        logger.info(f"Total jobs before filtering: {len(df)}")
+        logger.info(f"Jobs from target companies: {len(df[df['Company'].str.contains(company_pattern, case=False, na=False)])}")
+        logger.info(f"Jobs from today: {len(df[df['Date'].dt.date == today])}")
+        logger.info(f"Final filtered jobs: {len(filtered_df)}")
         
         if len(filtered_df) > 0:
-            logging.info("\nFiltered Jobs:")
-            logging.info(filtered_df[['Company', 'Position Title', 'Date']].to_string())
-            
-            # Save filtered jobs to Excel
+            logger.info("\nFiltered Jobs:")
+            logger.info(filtered_df[['Company', 'Position Title', 'Date']].to_string())
             save_filtered_jobs_to_excel(filtered_df)
         
-        # Save filtered data to CSV as well
-        filtered_csv_path = df.iloc[0]['csv_path'].replace('.csv', '_filtered.csv')
+        filtered_csv_path = csv_path.replace('.csv', '_filtered.csv')
         filtered_df.to_csv(filtered_csv_path, index=False)
-        logging.info(f"Filtered jobs saved to: {filtered_csv_path}")
-        
+        logger.info(f"Filtered jobs saved to: {filtered_csv_path}")
         return filtered_csv_path
-        
     except Exception as e:
-        logging.error(f"Error filtering jobs: {e}")
+        logger.error(f"Error filtering jobs: {e}")
         return None
 
 def send_csv_to_discord(csv_path):
-    """Send filtered job openings to Discord with formatted message."""
+    """Send filtered job openings to Discord as a formatted message."""
     try:
-        # Read the CSV file
         df = pd.read_csv(csv_path)
-        
-        # Load job history
         history = load_job_history()
-        
-        # Filter for new jobs only
         new_jobs = []
         for _, job in df.iterrows():
             if is_new_job(job, history):
                 new_jobs.append(job)
-        
-        # Save updated history
         save_job_history(history)
         
-        if len(new_jobs) == 0:
+        if not new_jobs:
             message = f"📊 **Job Update** ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
             message += "No new job openings found for today from target companies.\n"
             message += f"Total jobs checked: {len(df)}\n"
             message += f"Jobs from target companies: {len(df[df['Company'].str.contains('|'.join(map(re.escape, TARGET_COMPANIES)), case=False, na=False)])}\n"
             message += f"Jobs from today: {len(df[df['Date'].dt.date == datetime.now().date()])}"
         else:
-            # Create a formatted message
             message = f"🎯 **New Job Openings from Target Companies** ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
-            
             for job in new_jobs:
                 message += f"**Company:** {job['Company']}\n"
                 message += f"**Position:** {job['Position Title']}\n"
                 message += f"**Date:** {job['Date']}\n"
                 message += f"**Apply:** {job['Apply']}\n"
                 message += "-------------------\n\n"
-            
             message += f"\nTotal new jobs found: {len(new_jobs)}"
         
-        # Log the message content
-        logging.info(f"Preparing to send message to Discord:\n{message}")
-        
-        # Send the message to Discord
+        logger.info(f"Sending the following message to Discord:\n{message}")
         payload = {
             "content": message,
             "username": "Job Scraper Bot",
             "avatar_url": "https://i.imgur.com/4M34hi2.png"
         }
-        
         response = requests.post(WEBHOOK_URL, json=payload)
-        
         if response.status_code == 200:
-            logging.info("Successfully sent job openings to Discord")
+            logger.info("Successfully sent job openings to Discord")
             return True
         else:
-            logging.error(f"Failed to send to Discord. Status code: {response.status_code}")
-            logging.error(f"Response content: {response.text}")
+            logger.error(f"Failed to send to Discord. Status code: {response.status_code}")
+            logger.error(f"Response content: {response.text}")
             return False
-            
     except Exception as e:
-        logging.error(f"Error sending to Discord: {e}")
+        logger.error(f"Error sending to Discord: {e}")
         return False
 
 def download_airtable_csv(driver):
-    """Download CSV from Airtable."""
+    """Download CSV from Airtable by clicking the download button."""
     try:
-        # Navigate to Airtable URL
         driver.get(AIRTABLE_URL)
-        logging.info("Navigated to Airtable URL")
+        logger.info("Navigated to Airtable URL")
+        time.sleep(5)  # Allow page to load
         
-        # Wait for the table to load
-        time.sleep(5)
-        
-        # Set up wait
         wait = WebDriverWait(driver, 10)
-        
-        # Find and click the view menu button
-        menu_button = wait.until(EC.element_to_be_clickable((
-            By.CLASS_NAME, "viewMenuButton"
-        )))
+        menu_button = wait.until(EC.element_to_be_clickable((By.CLASS_NAME, "viewMenuButton")))
         menu_button.click()
-        logging.info("Clicked view menu button")
+        logger.info("Clicked view menu button")
         time.sleep(1)
         
-        # Click the Download CSV option
         csv_button = wait.until(EC.element_to_be_clickable((
             By.CSS_SELECTOR, "[data-tutorial-selector-id='viewMenuItem-viewExportCsv']"
         )))
         csv_button.click()
-        logging.info("Clicked Download CSV option")
+        logger.info("Clicked Download CSV option")
         
-        # Wait longer for download to complete
-        time.sleep(10)
+        time.sleep(10)  # Wait for download to complete
         
-        # Find the downloaded file in the CSV directory
         downloaded_files = [f for f in os.listdir(CSV_DIR) if f.endswith('.csv')]
         if not downloaded_files:
-            logging.error("No CSV file found in downloads")
+            logger.error("No CSV file found in downloads")
             return None
-            
-        # Get the most recently downloaded CSV
+        
         latest_csv = max(downloaded_files, key=lambda x: os.path.getctime(os.path.join(CSV_DIR, x)))
         csv_path = os.path.join(CSV_DIR, latest_csv)
         
-        # Rename the file with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         new_filename = f"jobs_{timestamp}.csv"
         new_path = os.path.join(CSV_DIR, new_filename)
         
         os.rename(csv_path, new_path)
-        logging.info(f"Saved CSV to: {new_path}")
-        
+        logger.info(f"Saved CSV to: {new_path}")
         return new_path
         
     except Exception as e:
-        logging.error(f"Error downloading CSV: {e}")
+        logger.error(f"Error downloading CSV: {e}")
         return None
+
+# ---------------- Main Execution ----------------
 
 def main():
     try:
-        # Your existing code here, but remove the while True loop
+        logger.info("Starting job scraping process...")
+        history = load_job_history()
+        
         driver = setup_driver()
         cleanup_old_csvs()
-        download_csv(driver)
+        
+        csv_path = download_airtable_csv(driver)
         driver.quit()
         
-        csv_file = get_latest_csv()
-        if not csv_file:
-            logger.error("No CSV file found")
+        if not csv_path:
+            logger.error("No CSV file found after download; aborting.")
             return
-            
-        df = pd.read_csv(csv_file)
-        new_jobs = filter_jobs(df)
         
-        if new_jobs:
-            send_csv_to_discord(new_jobs)
-            save_filtered_jobs(new_jobs)
-            update_job_history(new_jobs)
+        filtered_csv_path = filter_jobs(csv_path)
+        if not filtered_csv_path:
+            logger.error("Filtering failed; aborting.")
+            return
+        
+        if send_csv_to_discord(filtered_csv_path):
+            logger.info("Notification sent successfully")
         else:
-            logger.info("No new jobs found")
-            
+            logger.error("Failed to send notification to Discord")
+        
+        # Optionally, remove the downloaded CSV after processing
+        try:
+            os.remove(csv_path)
+            logger.info("Removed downloaded CSV file after processing.")
+        except Exception as e:
+            logger.error(f"Error removing CSV file: {e}")
+        
+        logger.info("Job scraping process completed")
+    
     except Exception as e:
-        logger.error(f"Error in main execution: {str(e)}")
+        logger.error(f"Error in main execution: {e}")
         raise
 
 if __name__ == "__main__":
