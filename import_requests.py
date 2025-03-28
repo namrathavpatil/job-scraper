@@ -119,46 +119,55 @@ def save_filtered_jobs_to_excel(df):
         logger.error(f"Error saving filtered jobs to Excel: {e}")
 
 def filter_jobs(csv_path):
+    """Filter jobs based on target companies and today's date, then save filtered data."""
     try:
         df = pd.read_csv(csv_path)
         logger.info("CSV Structure:")
         logger.info(f"Columns: {list(df.columns)}")
         logger.info(f"Number of rows: {len(df)}")
+        logger.info("\nSample of data:")
         logger.info(df.head())
 
-        # Convert to datetime safely
+        # Convert 'Date' column to datetime with error handling
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        logger.info(f"Rows with NaT in 'Date': {df['Date'].isna().sum()}")
+        logger.info("Converted 'Date' column to datetime.")
+        logger.info(f"First 10 non-null dates:\n{df['Date'].dropna().head(10)}")
+        logger.info(f"Earliest date in data: {df['Date'].min()}")
+        logger.info(f"Latest date in data: {df['Date'].max()}")
 
-        # Normalize to strip any time part
-        df['NormalizedDate'] = df['Date'].dt.normalize()
-        today = pd.Timestamp(datetime.now().date())
-
-        # Match company and date
+        # Filtering logic
+        today = datetime.now().date()
         company_pattern = '|'.join(map(re.escape, TARGET_COMPANIES))
         filtered_df = df[
             (df['Company'].str.contains(company_pattern, case=False, na=False)) &
-            (df['NormalizedDate'] == today)
+            (df['Date'].dt.date == today)
         ]
 
-        logger.info("\nFiltering Results:")
+        # Log filtering summary
+        logger.info(f"\nFiltering Results:")
         logger.info(f"Total jobs before filtering: {len(df)}")
         logger.info(f"Jobs from target companies: {len(df[df['Company'].str.contains(company_pattern, case=False, na=False)])}")
-        logger.info(f"Jobs from today: {len(df[df['NormalizedDate'] == today])}")
+        logger.info(f"Jobs from today: {len(df[df['Date'].dt.date == today])}")
         logger.info(f"Final filtered jobs: {len(filtered_df)}")
 
         if not filtered_df.empty:
             logger.info("\nFiltered Jobs:")
             logger.info(filtered_df[['Company', 'Position Title', 'Date']].to_string())
-            save_filtered_jobs_to_excel(filtered_df)
 
-        filtered_csv_path = csv_path.replace('.csv', '_filtered.csv')
-        filtered_df.to_csv(filtered_csv_path, index=False)
-        logger.info(f"Filtered jobs saved to: {filtered_csv_path}")
-        return filtered_csv_path
+            # Save Excel + CSV
+            save_filtered_jobs_to_excel(filtered_df)
+            filtered_csv_path = csv_path.replace('.csv', '_filtered.csv')
+            filtered_df.to_csv(filtered_csv_path, index=False)
+            logger.info(f"Filtered jobs saved to: {filtered_csv_path}")
+            return filtered_csv_path
+        else:
+            logger.info("No matching jobs found after filtering.")
+            return None
+
     except Exception as e:
         logger.error(f"Error filtering jobs: {e}")
         return None
+
 
 
 
