@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
 
 # Define base directory (adjust as needed)
 BASE_DIR = os.path.join(os.getcwd(), "job_data")
+# Define the base directory where job data will be stored
+BASE_DIR = os.path.join(os.getcwd(), "job_data")
+os.makedirs(BASE_DIR, exist_ok=True)  # Create the directory if it doesn't exist
+
+# Define the log file path
+LOGGED_JOBS_FILE = os.path.join(BASE_DIR, "jobs_sent_to_discord.txt")
 
 # Now you can use it
 LOGGED_JOBS_FILE = os.path.join(BASE_DIR, "jobs_sent_to_discord.txt")
@@ -240,6 +246,11 @@ def filter_jobs(csv_path):
         
 def log_sent_jobs(jobs):
     try:
+        os.makedirs(BASE_DIR, exist_ok=True)  # Make sure the folder exists
+        if not os.path.exists(LOGGED_JOBS_FILE):
+            with open(LOGGED_JOBS_FILE, "w") as f:
+                f.write("Position Title | Company | Date\n")  # Header for first-time file
+
         with open(LOGGED_JOBS_FILE, "a") as f:
             for job in jobs:
                 date_str = pd.to_datetime(job['Date'], errors='coerce')
