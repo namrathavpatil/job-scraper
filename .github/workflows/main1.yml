@@ -31,15 +31,16 @@ jobs:
           echo "Running: google-chrome-stable --version"
           google-chrome-stable --version
           
-          # Hardcode a known valid ChromeDriver version for Chrome 134
-          CHROMEDRIVER_VERSION="134.0.5735.90"
-          echo "Using CHROMEDRIVER_VERSION: $CHROMEDRIVER_VERSION"
+          # Use the matching ChromeDriver version
+          CHROMEDRIVER_VERSION="134.0.6998.165"
+          echo "Using ChromeDriver version: $CHROMEDRIVER_VERSION"
           
-          # Download ChromeDriver using the hardcoded version
-          wget -q "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip"
-          unzip chromedriver_linux64.zip
-          chmod +x chromedriver
-          sudo mv chromedriver /usr/local/bin/
+          # Download ChromeDriver
+          wget -q "https://storage.googleapis.com/chrome-for-testing-public/$CHROMEDRIVER_VERSION/linux64/chromedriver-linux64.zip"
+          unzip chromedriver-linux64.zip
+          chmod +x chromedriver-linux64/chromedriver
+          sudo mv chromedriver-linux64/chromedriver /usr/local/bin/
+
       
       - name: Install dependencies
         run: |
