@@ -182,34 +182,49 @@ def send_csv_to_discord(csv_path):
         save_job_history(history)
 
         if not new_jobs:
-            logger.info("No new job openings found for today from target companies.")
+            logger.info("No new job openings found for today from target companies or researcher titles.")
             return
 
-        message = f"🎯 **New Job Openings from Target Companies** ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
-        for job in new_jobs:
-            message += f"**Company:** {job['Company']}\n"
-            message += f"**Position:** {job['Position Title']}\n"
-            message += f"**Apply:** {job['Apply']}\n"
-            message += "-------------------\n\n"
-        message += f"\nTotal new jobs found: {len(new_jobs)}"
+        base_time = datetime.now().strftime('%Y-%m-%d %H:%M')
+        header = f"🎯 **New Job Openings** ({base_time})\n\n"
+        messages = []
+        current_msg = header
 
-        logger.info(f"Sending the following message to Discord:\n{message}")
-        payload = {
-            "content": message,
-            "username": "Job Scraper Bot",
-            "avatar_url": "https://i.imgur.com/4M34hi2.png"
-        }
-        response = requests.post(WEBHOOK_URL, json=payload)
-        if response.status_code == 200:
-            logger.info("Successfully sent job openings to Discord")
-            return True
-        else:
-            logger.error(f"Failed to send to Discord. Status code: {response.status_code}")
-            logger.error(f"Response content: {response.text}")
-            return False
+        for job in new_jobs:
+            job_text = (
+                f"**Company:** {job['Company']}\n"
+                f"**Position:** {job['Position Title']}\n"
+                f"**Apply:** {job['Apply']}\n"
+                "-------------------\n\n"
+            )
+            if len(current_msg) + len(job_text) > 1900:  # 1900 to leave room for formatting
+                messages.append(current_msg)
+                current_msg = ""
+            current_msg += job_text
+
+        if current_msg:
+            messages.append(current_msg)
+
+        for idx, msg in enumerate(messages):
+            payload = {
+                "content": msg,
+                "username": "Job Scraper Bot",
+                "avatar_url": "https://i.imgur.com/4M34hi2.png"
+            }
+            response = requests.post(WEBHOOK_URL, json=payload)
+            if response.status_code != 200:
+                logger.error(f"Failed to send part {idx + 1} to Discord. Status code: {response.status_code}")
+                logger.error(f"Response content: {response.text}")
+                return False
+            time.sleep(1)  # small delay to avoid rate limits
+
+        logger.info(f"Successfully sent {len(messages)} message(s) to Discord.")
+        return True
+
     except Exception as e:
         logger.error(f"Error sending to Discord: {e}")
         return False
+
 
 def download_airtable_csv(driver):
     try:
