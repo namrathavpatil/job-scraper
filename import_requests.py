@@ -12,6 +12,7 @@ import requests
 import pandas as pd
 import re
 import json
+import sys
 
 # Set up logging
 logging.basicConfig(
@@ -21,8 +22,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration from environment variables
-WEBHOOK_URL = os.getenv('WEBHOOK_URL', "https://discord.com/api/webhooks/1354915426156675243/KVQEjmIQpw4LaDOb5Sv_AItFu38KDEyWh1wXDN2zQbv2LZ66y55WOQayiHTjiOWzcimh")
-AIRTABLE_URL = os.getenv('AIRTABLE_URL', "https://airtable.com/embed/appjSXAWiVF4d1HoZ/shrf04yGbrK3IebAl/tbl7UBhvwqng6GRGZ?viewControls=on")
+WEBHOOK_URL = os.getenv('WEBHOOK_URL')
+AIRTABLE_URL = os.getenv('AIRTABLE_URL')
+
+if not WEBHOOK_URL or not AIRTABLE_URL:
+    logger.error("Missing required environment variables: WEBHOOK_URL or AIRTABLE_URL")
+    sys.exit(1)
 
 # Set up directories
 BASE_DIR = os.path.join(os.getcwd(), "job_data")
@@ -125,12 +130,9 @@ def save_filtered_jobs_to_excel(df):
     except Exception as e:
         logging.error(f"Error saving filtered jobs to Excel: {e}")
 
-def filter_jobs(csv_path):
+def filter_jobs(df):
     """Filter jobs based on target companies and today's date."""
     try:
-        # Read the CSV file
-        df = pd.read_csv(csv_path)
-        
         # Log the structure of the CSV
         logging.info("CSV Structure:")
         logging.info(f"Columns: {list(df.columns)}")
@@ -168,7 +170,7 @@ def filter_jobs(csv_path):
             save_filtered_jobs_to_excel(filtered_df)
         
         # Save filtered data to CSV as well
-        filtered_csv_path = csv_path.replace('.csv', '_filtered.csv')
+        filtered_csv_path = df.iloc[0]['csv_path'].replace('.csv', '_filtered.csv')
         filtered_df.to_csv(filtered_csv_path, index=False)
         logging.info(f"Filtered jobs saved to: {filtered_csv_path}")
         
@@ -295,46 +297,31 @@ def download_airtable_csv(driver):
         return None
 
 def main():
-    while True:
-        try:
-            logger.info("Starting job scraping process...")
+    try:
+        # Your existing code here, but remove the while True loop
+        driver = setup_driver()
+        cleanup_old_csvs()
+        download_csv(driver)
+        driver.quit()
+        
+        csv_file = get_latest_csv()
+        if not csv_file:
+            logger.error("No CSV file found")
+            return
             
-            driver = setup_driver()
-            try:
-                # Download CSV from Airtable
-                csv_path = download_airtable_csv(driver)
-                
-                if csv_path:
-                    # Filter the jobs
-                    filtered_csv_path = filter_jobs(csv_path)
-                    
-                    if filtered_csv_path:
-                        # Send filtered CSV to Discord
-                        if send_csv_to_discord(filtered_csv_path):
-                            logging.info("Successfully sent filtered CSV to Discord")
-                        else:
-                            logging.error("Failed to send filtered CSV to Discord")
-                    else:
-                        logging.error("Failed to filter jobs")
-                    
-                    # Clean up old CSV files
-                    cleanup_old_csvs()
-                else:
-                    logging.error("Failed to download CSV")
-                    
-            finally:
-                driver.quit()
+        df = pd.read_csv(csv_file)
+        new_jobs = filter_jobs(df)
+        
+        if new_jobs:
+            send_csv_to_discord(new_jobs)
+            save_filtered_jobs(new_jobs)
+            update_job_history(new_jobs)
+        else:
+            logger.info("No new jobs found")
             
-            logger.info("Job scraping process completed")
-            
-            # Wait for 1 hour before next run
-            logger.info("Waiting for 1 hour before next run...")
-            time.sleep(3600)  # 3600 seconds = 1 hour
-            
-        except Exception as e:
-            logger.error(f"Error in main loop: {e}")
-            logger.info("Waiting for 5 minutes before retrying...")
-            time.sleep(300)  # Wait 5 minutes before retrying on error
+    except Exception as e:
+        logger.error(f"Error in main execution: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main()
