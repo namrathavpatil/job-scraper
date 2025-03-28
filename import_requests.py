@@ -31,7 +31,7 @@ CSV_DIR = BASE_DIR / "csv_files"
 HISTORY_FILE = BASE_DIR / "job_history.json"
 FILTERED_EXCEL = BASE_DIR / "filtered_jobs.xlsx"
 
-TARGET_COMPANIES = ["Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper"]
+TARGET_COMPANIES = ["Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper", "Mayo Clinic"]
 
 BASE_DIR.mkdir(parents=True, exist_ok=True)
 CSV_DIR.mkdir(parents=True, exist_ok=True)
