@@ -52,4 +52,5 @@ jobs:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           AIRTABLE_URL: ${{ secrets.AIRTABLE_URL }}
           RESEARCH_WEBHOOK_URL: ${{ secrets.RESEARCH_WEBHOOK_URL}}
+          UNIVERSITY_WEBHOOK_URL: ${{secrets.UNIVERSITY_WEBHOOK_URL}}
         run: python import_requests.py
