@@ -176,29 +176,39 @@ def filter_jobs(csv_path):
         today = pd.Timestamp(datetime.now().date())
         company_pattern = '|'.join(map(re.escape, TARGET_COMPANIES))
 
+        # Filter jobs for target companies posted today
         company_df = df[
             df['Company'].str.contains(company_pattern, case=False, na=False) &
             (df['OnlyDate'] == today)
         ]
 
+        # Filter researcher jobs
         researcher_df = df[
             df['Position Title'].str.contains('researcher', case=False, na=False)
         ]
 
+        # Filter university jobs
         university_df = df[
             df['Company'].str.contains('university', case=False, na=False)
         ]
 
-        researcher_combined_df = pd.concat([researcher_df, university_df]).drop_duplicates()
+        # Exclude university jobs from researcher_df
+        non_university_researcher_df = researcher_df[
+            ~researcher_df['Company'].str.contains('university', case=False, na=False)
+        ]
+
+        researcher_combined_df = non_university_researcher_df
 
         logger.info(f"Target company jobs today: {len(company_df)}")
-        logger.info(f"'Researcher' jobs found: {len(researcher_df)}")
+        logger.info(f"'Researcher' jobs (non-university): {len(researcher_combined_df)}")
         logger.info(f"University jobs found: {len(university_df)}")
 
+        # Prepare output CSV paths
         company_csv = csv_path.replace('.csv', '_filtered_companies.csv')
         researcher_csv = csv_path.replace('.csv', '_filtered_researchers.csv')
         university_csv = csv_path.replace('.csv', '_filtered_universities.csv')
 
+        # Save CSVs
         if not company_df.empty:
             company_df.to_csv(company_csv, index=False)
         if not researcher_combined_df.empty:
@@ -206,17 +216,21 @@ def filter_jobs(csv_path):
         if not university_df.empty:
             university_df.to_csv(university_csv, index=False)
 
-        combined_df = pd.concat([company_df, researcher_combined_df]).drop_duplicates()
+        # Save combined Excel
+        combined_df = pd.concat([company_df, researcher_combined_df, university_df]).drop_duplicates()
         if not combined_df.empty:
             save_filtered_jobs_to_excel(combined_df)
 
-        return company_csv if not company_df.empty else None, \
-               researcher_csv if not researcher_combined_df.empty else None, \
-               university_csv if not university_df.empty else None
+        return (
+            company_csv if not company_df.empty else None,
+            researcher_csv if not researcher_combined_df.empty else None,
+            university_csv if not university_df.empty else None
+        )
 
     except Exception as e:
         logger.error(f"Error filtering jobs: {e}")
         return None, None, None
+
 
 def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
     try:
@@ -323,7 +337,7 @@ def main():
 
         company_csv, researcher_csv, university_csv = filter_jobs(csv_path)
 
-        if not company_csv and not researcher_csv:
+        if not company_csv and not researcher_csv and not university_csv:
             logger.error("No relevant jobs found; aborting.")
             return
 
@@ -332,7 +346,7 @@ def main():
 
         if researcher_csv:
             send_csv_to_discord(researcher_csv, RESEARCH_WEBHOOK_URL, label="Researcher Jobs")
-        
+
         if university_csv:
             send_csv_to_discord(university_csv, UNIVERSITY_WEBHOOK_URL, label="University Jobs")
 
@@ -346,6 +360,7 @@ def main():
     except Exception as e:
         logger.error(f"Error in main execution: {e}")
         raise
+
 
 
 if __name__ == "__main__":
