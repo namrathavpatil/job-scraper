@@ -4,8 +4,6 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import pandas as pd
 import os
-import ssl
-import certifi
 
 logger = logging.getLogger(__name__)
 
@@ -17,22 +15,8 @@ class JobDatabase:
             raise ValueError("MONGODB_URI environment variable is not set")
         
         try:
-            # Create SSL context
-            ssl_context = ssl.create_default_context(cafile=certifi.where())
-            
-            # Create a new client and connect to the server with SSL context
-            self.client = MongoClient(
-                uri,
-                server_api=ServerApi('1'),
-                ssl=True,
-                ssl_cert_reqs=ssl.CERT_REQUIRED,
-                ssl_ca_certs=certifi.where(),
-                connectTimeoutMS=30000,  # Increase timeout to 30 seconds
-                socketTimeoutMS=30000,
-                serverSelectionTimeoutMS=30000,
-                retryWrites=True,
-                retryReads=True
-            )
+            # Create a new client and connect to the server
+            self.client = MongoClient(uri, server_api=ServerApi('1'))
             
             # Send a ping to confirm a successful connection
             self.client.admin.command('ping')
