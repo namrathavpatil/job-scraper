@@ -23,6 +23,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# Define base directory (adjust as needed)
+BASE_DIR = os.path.join(os.getcwd(), "job_data")
+
+# Now you can use it
 LOGGED_JOBS_FILE = os.path.join(BASE_DIR, "jobs_sent_to_discord.txt")
 
 # Configuration from environment variables
