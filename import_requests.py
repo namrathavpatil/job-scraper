@@ -25,12 +25,11 @@ logger = logging.getLogger(__name__)
 
 # Configuration from environment variables
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-AIRTABLE_URL = os.getenv('AIRTABLE_URL')
 RESEARCH_WEBHOOK_URL = os.getenv('RESEARCH_WEBHOOK_URL')
 UNIVERSITY_WEBHOOK_URL = os.getenv('UNIVERSITY_WEBHOOK_URL')
 
-if not WEBHOOK_URL or not AIRTABLE_URL or not RESEARCH_WEBHOOK_URL or not UNIVERSITY_WEBHOOK_URL:
-    logger.error("Missing required environment variables: WEBHOOK_URL, AIRTABLE_URL, RESEARCH_WEBHOOK_URL, or UNIVERSITY_WEBHOOK_URL")
+if not WEBHOOK_URL or not RESEARCH_WEBHOOK_URL or not UNIVERSITY_WEBHOOK_URL:
+    logger.error("Missing required environment variables: WEBHOOK_URL, RESEARCH_WEBHOOK_URL, or UNIVERSITY_WEBHOOK_URL")
     sys.exit(1)
     
 # Set up directories (adjust as needed)
@@ -44,7 +43,7 @@ LOGGED_JOBS_FILE = os.path.join(BASE_DIR, "jobs_sent_to_discord.txt")
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(CSV_DIR, exist_ok=True)
 
-# Target companies to filter for (including TikTok)
+# Target companies to filter for
 TARGET_COMPANIES = [
     "Google", "Microsoft", "Amazon", "Meta", "Apple", "TikTok", "Draper", "Yahoo", "Tesla", "Nvidia",
     "Hyundai", "Deloitte", "PwC", "EY", "KPMG", "Goldman Sachs", "The Walt Disney Company", "Wells Fargo",
@@ -153,9 +152,35 @@ def setup_driver():
     service = Service('/usr/bin/chromedriver')
     return webdriver.Chrome(service=service, options=chrome_options)
 
-def download_airtable_csv(driver):
+def get_airtable_url_from_internlist(category_key):
+    """
+    Visit intern-list.com with a specific category key and extract the Airtable URL
+    """
+    driver = setup_driver()
     try:
-        driver.get(AIRTABLE_URL)
+        # Visit the website with the specific category
+        url = f"https://www.intern-list.com/?k={category_key}"
+        logger.info(f"Visiting {url}")
+        driver.get(url)
+        time.sleep(5)  # Give time for the page to load
+        
+        # Find the active category element
+        active_element = driver.find_element(By.CSS_SELECTOR, ".div-block-14.active")
+        
+        # Get the airtable-link attribute
+        airtable_url = active_element.get_attribute("airtable-link")
+        logger.info(f"Found Airtable URL for category {category_key}: {airtable_url}")
+        
+        return airtable_url
+    except Exception as e:
+        logger.error(f"Error getting Airtable URL: {e}")
+        return None
+    finally:
+        driver.quit()
+
+def download_airtable_csv(driver, airtable_url, category_key):
+    try:
+        driver.get(airtable_url)
         logger.info("Navigated to Airtable URL")
         time.sleep(5)
         wait = WebDriverWait(driver, 10)
@@ -174,7 +199,7 @@ def download_airtable_csv(driver):
         latest_csv = max(downloaded_files, key=lambda x: os.path.getctime(os.path.join(CSV_DIR, x)))
         csv_path = os.path.join(CSV_DIR, latest_csv)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-        new_path = os.path.join(CSV_DIR, f"jobs_{timestamp}.csv")
+        new_path = os.path.join(CSV_DIR, f"{category_key}_jobs_{timestamp}.csv")
         os.rename(csv_path, new_path)
         logger.info(f"Saved CSV to: {new_path}")
         return new_path
@@ -311,7 +336,6 @@ def save_filtered_jobs_to_excel(df):
     except Exception as e:
         logger.error(f"Error saving filtered jobs to Excel: {e}")
 
-
 def filter_jobs(csv_path):
     try:
         df = pd.read_csv(csv_path)
@@ -372,53 +396,60 @@ def filter_jobs(csv_path):
         logger.error(f"Error filtering jobs: {e}")
         return None, None, None
 
-
-
 def main():
     try:
         logger.info("Starting job scraping process...")
         cleanup_old_csvs()
 
-        # Launch browser and download Airtable CSV
-        driver = setup_driver()
-        csv_path = download_airtable_csv(driver)
-        driver.quit()
+        # Categories to process
+        categories = ["aiml", "swe"]
 
-        if not csv_path:
-            logger.error("No CSV file found after download; aborting.")
-            return
+        for category in categories:
+            # Get Airtable URL from intern-list.com
+            airtable_url = get_airtable_url_from_internlist(category)
 
-        # Filter and save to separate CSVs — returns file paths
-        company_csv, researcher_csv, university_csv = filter_jobs(csv_path)
+            if not airtable_url:
+                logger.error(f"Failed to get Airtable URL for category: {category}")
+                continue
 
-        # If all are None, there's nothing new to send
-        if company_csv is None and researcher_csv is None and university_csv is None:
-            logger.error("No relevant jobs found; aborting.")
-            return
+            # Launch browser and download Airtable CSV
+            driver = setup_driver()
+            csv_path = download_airtable_csv(driver, airtable_url, category)
+            driver.quit()
 
-        # Send each non-empty filtered CSV to the appropriate Discord webhook
-        if company_csv is not None:
-            send_csv_to_discord(company_csv, WEBHOOK_URL, label="Target Company Jobs")
+            if not csv_path:
+                logger.error(f"No CSV file found after download for category {category}; skipping.")
+                continue
 
-        if researcher_csv is not None:
-            send_csv_to_discord(researcher_csv, RESEARCH_WEBHOOK_URL, label="Researcher Jobs")
+            # Filter and save to separate CSVs — returns file paths
+            company_csv, researcher_csv, university_csv = filter_jobs(csv_path)
 
-        if university_csv is not None:
-            send_csv_to_discord(university_csv, UNIVERSITY_WEBHOOK_URL, label="University Jobs")
+            # If all are None, there's nothing new to send
+            if company_csv is None and researcher_csv is None and university_csv is None:
+                logger.error(f"No relevant jobs found for category {category}; skipping.")
+                continue
 
-        # Clean up the original downloaded CSV
-        try:
-            os.remove(csv_path)
-            logger.info("Removed downloaded CSV file after processing.")
-        except Exception as e:
-            logger.error(f"Error removing CSV file: {e}")
+            # Send each non-empty filtered CSV to the appropriate Discord webhook
+            if company_csv is not None:
+                send_csv_to_discord(company_csv, WEBHOOK_URL, label=f"{category.upper()} Target Company Jobs")
+
+            if researcher_csv is not None:
+                send_csv_to_discord(researcher_csv, RESEARCH_WEBHOOK_URL, label=f"{category.upper()} Researcher Jobs")
+
+            if university_csv is not None:
+                send_csv_to_discord(university_csv, UNIVERSITY_WEBHOOK_URL, label=f"{category.upper()} University Jobs")
+
+            # Clean up the original downloaded CSV
+            try:
+                os.remove(csv_path)
+                logger.info(f"Removed downloaded CSV file for category {category} after processing.")
+            except Exception as e:
+                logger.error(f"Error removing CSV file for category {category}: {e}")
 
         logger.info("Job scraping process completed successfully.")
     except Exception as e:
         logger.error(f"Error in main execution: {e}")
         raise
-
-
 
 if __name__ == "__main__":
     main()
