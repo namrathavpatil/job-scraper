@@ -369,6 +369,7 @@ def filter_jobs(csv_path):
         return None, None, None
 
 
+
 def main():
     try:
         logger.info("Starting job scraping process...")
