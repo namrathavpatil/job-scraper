@@ -159,10 +159,13 @@ def setup_driver():
     service = Service('/usr/bin/chromedriver')
     return webdriver.Chrome(service=service, options=chrome_options)
 
-# Function to extract the Airtable URL from intern-list.com
 def get_airtable_url_from_internlist(category_key):
+    """
+    Visit intern-list.com with a specific category key and extract the Airtable URL
+    """
     driver = setup_driver()
     try:
+        # Visit the website with the specific category
         url = f"https://www.intern-list.com/?k={category_key}"
         logger.info(f"Visiting {url}")
         driver.get(url)
@@ -179,7 +182,6 @@ def get_airtable_url_from_internlist(category_key):
     finally:
         driver.quit()
 
-# Function to download CSV from Airtable URL
 def download_airtable_csv(driver, airtable_url, category_key):
     try:
         driver.get(airtable_url)
@@ -293,7 +295,7 @@ def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
         if success:
             try:
                 save_job_history(history)  # Persist history after sending
-                log_sent_jobs([job.to_dict() for job in new_jobs])  # Log sent jobs
+                log_sent_jobs(new_jobs)  # Log sent jobs
                 logger.info(f"Successfully sent {label.lower()} to Discord and updated history.")
             except Exception as e:
                 logger.error(f"Error saving job history or logging sent jobs: {e}")
@@ -356,14 +358,17 @@ def filter_jobs(csv_path):
             count = len(company_df[company_df['Company'] == company])
             logger.info(f"  {company}: {count} job(s)")
         
+        # Filter for researcher positions
         researcher_df = df[
             df['Position Title'].str.contains('researcher', case=False, na=False)
         ]
         
+        # Filter for university positions
         university_df = df[
             df['Company'].str.contains('university', case=False, na=False)
         ]
         
+        # Filter for non-university researcher positions
         non_university_researcher_df = researcher_df[
             ~researcher_df['Company'].str.contains('university', case=False, na=False)
         ]
@@ -391,19 +396,13 @@ def filter_jobs(csv_path):
         return None, None, None
 
 # Function to scrape newgrad-jobs.com and send data to Discord
-def scrape_newgrad_jobs(category_key, webhook_url):
-    temp_csv_path = None  # Initialize temp_csv_path outside the try block
+def scrape_newgrad_jobs(category_key):
     try:
         logger.info(f"Starting scraping process for newgrad-jobs.com for category: {category_key}...")
         
         driver = setup_driver()
         driver.get(f"https://www.newgrad-jobs.com/?k={category_key}")
         time.sleep(5)
-        
-        # Log the iframe src
-        iframe = driver.find_element(By.ID, "airtable-box")
-        airtable_url = iframe.get_attribute("src")
-        logger.info(f"Airtable URL for newgrad-jobs.com ({category_key}): {airtable_url}")
         
         # Extract job data from the website
         job_data = []
@@ -429,33 +428,104 @@ def scrape_newgrad_jobs(category_key, webhook_url):
 
         if not job_data:
             logger.info(f"No jobs found on newgrad-jobs.com for category: {category_key}")
-            return
+            return []  # Return an empty list if no jobs are found
         
         df = pd.DataFrame(job_data)
+        return df  # Return the DataFrame of jobs
+    except Exception as e:
+        logger.error(f"Error scraping newgrad-jobs.com: {e}")
+        return []  # Return an empty list in case of an error
 
-        # Temporary CSV file to store job data
-        temp_csv_path = os.path.join(CSV_DIR, f"newgrad_jobs_{category_key}_temp.csv")
-        df.to_csv(temp_csv_path, index=False)
+# Function to scrape intern-list
+def scrape_intern_list(category_key):
+    try:
+        airtable_url = get_airtable_url_from_internlist(category_key)
 
-        # Load job history
-        history = load_job_history()
+        if not airtable_url:
+            logger.error(f"Failed to get Airtable URL for category: {category_key}")
+            return None
 
-        # Filter for new jobs
-        new_jobs = []
-        for _, job in df.iterrows():
-            if is_new_job(job, history):
-                new_jobs.append(job)
-        
-        if not new_jobs:
-            logger.info(f"No new jobs found on newgrad-jobs.com for category: {category_key} after filtering")
+        driver = setup_driver()
+        csv_path = download_airtable_csv(driver, airtable_url, category_key)
+        driver.quit()
+        return csv_path
+
+    except Exception as e:
+        logger.error(f"Error scraping intern-list.com: {e}")
+        return None
+
+def main():
+    try:
+        logger.info("Starting job scraping process...")
+        cleanup_old_csvs()
+
+        # Process intern-list.com categories
+        for category in CATEGORIES:
+            csv_path = scrape_intern_list(category)
+
+            if not csv_path:
+                logger.error(f"No CSV file found after download for category {category}; skipping.")
+                continue
+
+            company_csv, researcher_csv, university_csv = filter_jobs(csv_path)
+
+            if company_csv is None and researcher_csv is None and university_csv is None:
+                logger.error(f"No relevant jobs found for category {category}; skipping.")
+                continue
+
+            if company_csv is not None:
+                send_csv_to_discord(company_csv, WEBHOOK_URL, label=f"{category.upper()} Target Company Jobs")
+
+            if researcher_csv is not None:
+                send_csv_to_discord(researcher_csv, RESEARCH_WEBHOOK_URL, label=f"{category.upper()} Researcher Jobs")
+
+            if university_csv is not None:
+                send_csv_to_discord(university_csv, UNIVERSITY_WEBHOOK_URL, label=f"{category.upper()} University Jobs")
+
+            try:
+                os.remove(csv_path)
+                logger.info(f"Removed downloaded CSV file for category {category} after processing.")
+            except Exception as e:
+                logger.error(f"Error removing CSV file: {e}")
+
+        # Scrape newgrad-jobs.com for each category and send to WEBHOOK_URL1
+        newgrad_jobs = []  # List to hold jobs from all categories
+        for category in CATEGORIES:
+            jobs_df = scrape_newgrad_jobs(category)
+            if not jobs_df.empty:
+                newgrad_jobs.extend(jobs_df.to_dict('records'))
+
+        # Send all scraped jobs to Discord
+        if newgrad_jobs:
+            send_newgrad_jobs_to_discord(newgrad_jobs, WEBHOOK_URL1)
+
+        logger.info("Job scraping process completed successfully.")
+    except Exception as e:
+        logger.error(f"Error in main execution: {e}")
+        raise
+
+def send_newgrad_jobs_to_discord(newgrad_jobs, webhook_url):
+    try:
+        if not webhook_url:
+            logger.error("Webhook URL is empty for newgrad-jobs.com")
             return
 
-        logger.info(f"Found {len(new_jobs)} new jobs on newgrad-jobs.com for category: {category_key} to send to Discord")
+        history = load_job_history()
+        new_jobs = []
+        for job in newgrad_jobs:
+            if is_new_job(job, history):
+                new_jobs.append(job)
+
+        if not new_jobs:
+            logger.info("No new newgrad-jobs.com jobs found after filtering")
+            return
+
+        logger.info(f"Found {len(new_jobs)} newgrad-jobs.com jobs to send to Discord")
 
         base_time = datetime.now().strftime('%Y-%m-%d %H:%M')
         messages = []
-        current_msg = f"🎯 **New New-Grad Jobs ({category_key.upper()})** ({base_time})\n\n"
-        
+        current_msg = f"🎯 **New New-Grad Jobs** ({base_time})\n\n"
+
         for job in new_jobs:
             job_text = (
                 f"**Company:** {job['Company']}\n"
@@ -482,9 +552,9 @@ def scrape_newgrad_jobs(category_key, webhook_url):
             response = requests.post(webhook_url, json=payload)
 
             if response.status_code in [200, 204]:
-                logger.info(f"Successfully sent part {idx + 1} to Discord (newgrad-jobs.com - {category_key})")
+                logger.info(f"Successfully sent part {idx + 1} to Discord (newgrad-jobs.com)")
             else:
-                logger.error(f"Failed to send part {idx + 1} to Discord (newgrad-jobs.com - {category_key}). Status code: {response.status_code}")
+                logger.error(f"Failed to send part {idx + 1} to Discord (newgrad-jobs.com). Status code: {response.status_code}")
                 logger.error(f"Response content: {response.text}")
                 success = False
 
@@ -493,73 +563,15 @@ def scrape_newgrad_jobs(category_key, webhook_url):
         if success:
             try:
                 save_job_history(history)  # Persist history after sending
-                log_sent_jobs([job.to_dict() for job in new_jobs])  # Log sent jobs
-                logger.info(f"Successfully sent newgrad-jobs.com ({category_key}) openings to Discord and updated history.")
+                log_sent_jobs(new_jobs)  # Log sent jobs
+                logger.info("Successfully sent newgrad-jobs.com openings to Discord and updated history.")
             except Exception as e:
                 logger.error(f"Error saving job history or logging sent jobs: {e}")
         else:
-            logger.error(f"Failed to send newgrad-jobs.com ({category_key}) openings to Discord, not updating history")
+            logger.error("Failed to send newgrad-jobs.com openings to Discord, not updating history")
 
     except Exception as e:
-        logger.error(f"Error scraping newgrad-jobs.com: {e}")
-    finally:
-        if temp_csv_path and os.path.exists(temp_csv_path):
-            try:
-                os.remove(temp_csv_path)
-                logger.info("Removed temporary CSV file")
-            except Exception as e:
-                logger.error(f"Error removing temporary CSV file: {e}")
-
-def main():
-    try:
-        logger.info("Starting job scraping process...")
-        cleanup_old_csvs()
-
-        # Process intern-list.com categories
-        for category in CATEGORIES:
-            airtable_url = get_airtable_url_from_internlist(category)
-
-            if not airtable_url:
-                logger.error(f"Failed to get Airtable URL for category: {category}")
-                continue
-
-            driver = setup_driver()
-            csv_path = download_airtable_csv(driver, airtable_url, category)
-            driver.quit()
-
-            if not csv_path:
-                logger.error(f"No CSV file found after download for category {category}; skipping.")
-                continue
-
-            company_csv, researcher_csv, university_csv = filter_jobs(csv_path)
-
-            if company_csv is None and researcher_csv is None and university_csv is None:
-                logger.error(f"No relevant jobs found for category {category}; skipping.")
-                continue
-
-            if company_csv is not None:
-                send_csv_to_discord(company_csv, WEBHOOK_URL, label=f"{category.upper()} Target Company Jobs")
-
-            if researcher_csv is not None:
-                send_csv_to_discord(researcher_csv, RESEARCH_WEBHOOK_URL, label=f"{category.upper()} Researcher Jobs")
-
-            if university_csv is not None:
-                send_csv_to_discord(university_csv, UNIVERSITY_WEBHOOK_URL, label=f"{category.upper()} University Jobs")
-
-            try:
-                os.remove(csv_path)
-                logger.info(f"Removed downloaded CSV file for category {category} after processing.")
-            except Exception as e:
-                logger.error(f"Error removing CSV file for category {category}: {e}")
-
-        # Scrape newgrad-jobs.com for each category and send to WEBHOOK_URL1
-        for category in CATEGORIES:
-            scrape_newgrad_jobs(category, WEBHOOK_URL1)
-
-        logger.info("Job scraping process completed successfully.")
-    except Exception as e:
-        logger.error(f"Error in main execution: {e}")
-        raise
+        logger.error(f"Error sending newgrad-jobs.com jobs to Discord: {e}")
 
 if __name__ == "__main__":
     main()
