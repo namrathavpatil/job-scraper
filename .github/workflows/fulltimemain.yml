@@ -48,11 +48,8 @@ jobs:
 
     - name: Run job scraper
       env:
-        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         WEBHOOK_URL1: ${{ secrets.WEBHOOK_URL1 }}
-        AIRTABLE_URL: ${{ secrets.AIRTABLE_URL }}
-        RESEARCH_WEBHOOK_URL: ${{ secrets.RESEARCH_WEBHOOK_URL }}
-        UNIVERSITY_WEBHOOK_URL: ${{ secrets.UNIVERSITY_WEBHOOK_URL }}
+        
       run: python import_requests1.py
 
     - name: Upload job history artifact
