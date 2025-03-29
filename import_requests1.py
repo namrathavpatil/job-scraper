@@ -88,30 +88,31 @@ TARGET_COMPANIES = [
     "Chevron Corporation", "Cigna", "Ford Motor Company", "Bank of America", "General Motors", "Elevance Health","SoundCloud", "SharkNinja", "Juniper Networks", "Cisco ThousandEyes"
 ]
 
+# Function to load job history from file
 def load_job_history():
     try:
         if os.path.exists(HISTORY_FILE):
             with open(HISTORY_FILE, 'r') as f:
                 data = json.load(f)
-                # Convert list to set if it exists, otherwise create empty set
                 data["seen_jobs"] = set(data.get("seen_jobs", []))
                 logger.info(f"Loaded {len(data['seen_jobs'])} previously seen jobs from history")
                 return data
-        logger.info("No job history found, starting fresh")
-        return {"seen_jobs": set()}
+        else:
+            logger.info("No job history found, starting fresh")
+            return {"seen_jobs": set()}
     except Exception as e:
         logger.error(f"Error loading job history: {e}")
         return {"seen_jobs": set()}
 
+# Function to save job history to file
 def save_job_history(history):
     try:
-        # Convert set to list before saving
         history["seen_jobs"] = list(history.get("seen_jobs", set()))
         with open(HISTORY_FILE, 'w') as f:
             json.dump(history, f)
         logger.info(f"Saved {len(history['seen_jobs'])} jobs to history")
         
-        # If running in GitHub Actions, commit the changes
+        # Commit to git if running in GitHub Actions
         if os.getenv('GITHUB_ACTIONS'):
             try:
                 os.system('git config --global user.name "github-actions"')
@@ -125,6 +126,7 @@ def save_job_history(history):
     except Exception as e:
         logger.error(f"Error saving job history: {e}")
 
+# Function to check if a job is new
 def is_new_job(job, history):
     job_key = f"{job['Company']}_{job['Position Title']}"
     if job_key not in history["seen_jobs"]:
@@ -134,6 +136,7 @@ def is_new_job(job, history):
     logger.debug(f"Skipping already seen job: {job['Company']} - {job['Position Title']}")
     return False
 
+# Function to set up the Chrome driver
 def setup_driver():
     chrome_options = Options()
     chrome_options.add_argument("--headless")
@@ -156,22 +159,16 @@ def setup_driver():
     service = Service('/usr/bin/chromedriver')
     return webdriver.Chrome(service=service, options=chrome_options)
 
+# Function to extract the Airtable URL from intern-list.com
 def get_airtable_url_from_internlist(category_key):
-    """
-    Visit intern-list.com with a specific category key and extract the Airtable URL
-    """
     driver = setup_driver()
     try:
-        # Visit the website with the specific category
         url = f"https://www.intern-list.com/?k={category_key}"
         logger.info(f"Visiting {url}")
         driver.get(url)
-        time.sleep(5)  # Give time for the page to load
+        time.sleep(5)
         
-        # Find the active category element
         active_element = driver.find_element(By.CSS_SELECTOR, ".div-block-14.active")
-        
-        # Get the airtable-link attribute
         airtable_url = active_element.get_attribute("airtable-link")
         logger.info(f"Found Airtable URL for category {category_key}: {airtable_url}")
         
@@ -182,6 +179,7 @@ def get_airtable_url_from_internlist(category_key):
     finally:
         driver.quit()
 
+# Function to download CSV from Airtable URL
 def download_airtable_csv(driver, airtable_url, category_key):
     try:
         driver.get(airtable_url)
@@ -211,12 +209,13 @@ def download_airtable_csv(driver, airtable_url, category_key):
         logger.error(f"Error downloading CSV: {e}")
         return None
 
+# Function to log sent jobs to a text file
 def log_sent_jobs(jobs):
     try:
-        os.makedirs(BASE_DIR, exist_ok=True)  # Make sure the folder exists
+        os.makedirs(BASE_DIR, exist_ok=True)
         if not os.path.exists(LOGGED_JOBS_FILE):
             with open(LOGGED_JOBS_FILE, "w") as f:
-                f.write("Position Title | Company | Date\n")  # Header for first-time file
+                f.write("Position Title | Company | Date\n")
 
         with open(LOGGED_JOBS_FILE, "a") as f:
             for job in jobs:
@@ -229,6 +228,7 @@ def log_sent_jobs(jobs):
     except Exception as e:
         logger.error(f"Error logging sent jobs: {e}")
 
+# Function to send CSV content to Discord webhook
 def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
     try:
         if not webhook_url:
@@ -239,14 +239,12 @@ def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
             logger.error(f"Invalid webhook URL format for {label}")
             return False
 
-        # Load job history at the start
         history = load_job_history()
         logger.info(f"Checking {label} against {len(history['seen_jobs'])} previously seen jobs")
 
         df = pd.read_csv(csv_path)
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         
-        # Filter for new jobs
         new_jobs = [job for _, job in df.iterrows() if is_new_job(job, history)]
         
         if not new_jobs:
@@ -283,7 +281,7 @@ def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
             }
             response = requests.post(webhook_url, json=payload)
 
-            if response.status_code in [200, 204]:  # Both are success codes
+            if response.status_code in [200, 204]:
                 logger.info(f"Successfully sent part {idx + 1} to Discord (label: {label})")
             else:
                 logger.error(f"Failed to send part {idx + 1} to Discord (label: {label}). Status code: {response.status_code}")
@@ -294,28 +292,21 @@ def send_csv_to_discord(csv_path, webhook_url, label="Job Openings"):
 
         if success:
             try:
-                # Save to job history
-                logger.info(f"Saving {len(new_jobs)} new jobs to history file")
-                save_job_history(history)
-                
-                # Log sent jobs to text file
-                logger.info(f"Logging {len(new_jobs)} sent jobs to {LOGGED_JOBS_FILE}")
-                log_sent_jobs(new_jobs)
-                
-                logger.info(f"Successfully sent all {label.lower()} to Discord and updated both history files")
+                save_job_history(history)  # Persist history after sending
+                log_sent_jobs([job.to_dict() for job in new_jobs])  # Log sent jobs
+                logger.info(f"Successfully sent {label.lower()} to Discord and updated history.")
             except Exception as e:
                 logger.error(f"Error saving job history or logging sent jobs: {e}")
-                # Don't return False here as the Discord messages were sent successfully
         else:
-            logger.error(f"Failed to send all {label.lower()} to Discord, not updating history")
-            return False
+            logger.error(f"Failed to send {label.lower()} to Discord, not updating history")
 
-        return True
+        return success
 
     except Exception as e:
         logger.error(f"Error sending {label.lower()} to Discord: {e}")
         return False
 
+# Function to clean up old CSV files in the CSV_DIR
 def cleanup_old_csvs():
     current_time = datetime.now()
     for filename in os.listdir(CSV_DIR):
@@ -329,6 +320,7 @@ def cleanup_old_csvs():
                 except Exception as e:
                     logger.error(f"Error deleting old CSV file {filename}: {e}")
 
+# Function to save filtered jobs to an Excel file
 def save_filtered_jobs_to_excel(df):
     try:
         if os.path.exists(FILTERED_EXCEL):
@@ -340,6 +332,7 @@ def save_filtered_jobs_to_excel(df):
     except Exception as e:
         logger.error(f"Error saving filtered jobs to Excel: {e}")
 
+# Function to filter jobs based on company, researcher, and university criteria
 def filter_jobs(csv_path):
     try:
         df = pd.read_csv(csv_path)
@@ -363,17 +356,14 @@ def filter_jobs(csv_path):
             count = len(company_df[company_df['Company'] == company])
             logger.info(f"  {company}: {count} job(s)")
         
-        # Filter for researcher positions
         researcher_df = df[
             df['Position Title'].str.contains('researcher', case=False, na=False)
         ]
         
-        # Filter for university positions
         university_df = df[
             df['Company'].str.contains('university', case=False, na=False)
         ]
         
-        # Filter for non-university researcher positions
         non_university_researcher_df = researcher_df[
             ~researcher_df['Company'].str.contains('university', case=False, na=False)
         ]
@@ -402,12 +392,18 @@ def filter_jobs(csv_path):
 
 # Function to scrape newgrad-jobs.com and send data to Discord
 def scrape_newgrad_jobs(category_key, webhook_url):
+    temp_csv_path = None  # Initialize temp_csv_path outside the try block
     try:
         logger.info(f"Starting scraping process for newgrad-jobs.com for category: {category_key}...")
         
         driver = setup_driver()
         driver.get(f"https://www.newgrad-jobs.com/?k={category_key}")
         time.sleep(5)
+        
+        # Log the iframe src
+        iframe = driver.find_element(By.ID, "airtable-box")
+        airtable_url = iframe.get_attribute("src")
+        logger.info(f"Airtable URL for newgrad-jobs.com ({category_key}): {airtable_url}")
         
         # Extract job data from the website
         job_data = []
@@ -507,12 +503,12 @@ def scrape_newgrad_jobs(category_key, webhook_url):
     except Exception as e:
         logger.error(f"Error scraping newgrad-jobs.com: {e}")
     finally:
-        try:
-            if os.path.exists(temp_csv_path):
+        if temp_csv_path and os.path.exists(temp_csv_path):
+            try:
                 os.remove(temp_csv_path)
                 logger.info("Removed temporary CSV file")
-        except Exception as e:
-            logger.error(f"Error removing temporary CSV file: {e}")
+            except Exception as e:
+                logger.error(f"Error removing temporary CSV file: {e}")
 
 def main():
     try:
