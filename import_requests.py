@@ -311,25 +311,29 @@ def save_filtered_jobs_to_excel(df):
     except Exception as e:
         logger.error(f"Error saving filtered jobs to Excel: {e}")
 
+
 def filter_jobs(csv_path):
     try:
         df = pd.read_csv(csv_path)
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df = df[df['Date'].notna()]
         
-        # Convert to PDT timezone
         import pytz
         pdt_timezone = pytz.timezone('America/Los_Angeles')
         today = datetime.now(pdt_timezone).date()
+        logger.info(f"Today's date in PDT: {today}")
         
-        # Create pattern for company matching
         company_pattern = '|'.join(map(re.escape, TARGET_COMPANIES))
-
-        # Filter for target companies with today's date in PDT
+        
         company_df = df[
             df['Company'].str.contains(company_pattern, case=False, na=False) &
             (df['Date'].dt.date == today)
         ]
+        
+        logger.info(f"Filtered companies for today ({today}):")
+        for company in company_df['Company'].unique():
+            count = len(company_df[company_df['Company'] == company])
+            logger.info(f"  {company}: {count} job(s)")
         
         # Filter for researcher positions
         researcher_df = df[
