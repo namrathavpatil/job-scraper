@@ -3,15 +3,15 @@ name: Job Scraper
 on:
   schedule:
     - cron: '0 * * * *'  # Runs every hour
-  workflow_dispatch:
+  workflow_dispatch:  # Allows manual trigger
 
 permissions:
-  contents: write
+  contents: write  # Needed to push updates to job_history.json
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
-
+    
     steps:
     - uses: actions/checkout@v3
 
@@ -32,6 +32,7 @@ jobs:
         echo "Running: google-chrome-stable --version"
         google-chrome-stable --version
         CHROMEDRIVER_VERSION="134.0.6998.165"
+        echo "Using ChromeDriver version: $CHROMEDRIVER_VERSION"
         wget -q "https://storage.googleapis.com/chrome-for-testing-public/$CHROMEDRIVER_VERSION/linux64/chromedriver-linux64.zip"
         unzip chromedriver-linux64.zip
         chmod +x chromedriver-linux64/chromedriver
@@ -47,9 +48,12 @@ jobs:
 
     - name: Run job scraper
       env:
-        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL1 }}
-        AIRTABLE_URL: ${{ secrets.AIRTABLE_URL1 }}
-      run: python import_requests1.py
+        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        WEBHOOK_URL1: ${{ secrets.WEBHOOK_URL1 }}
+        AIRTABLE_URL: ${{ secrets.AIRTABLE_URL }}
+        RESEARCH_WEBHOOK_URL: ${{ secrets.RESEARCH_WEBHOOK_URL }}
+        UNIVERSITY_WEBHOOK_URL: ${{ secrets.UNIVERSITY_WEBHOOK_URL }}
+      run: python import_requests.py
 
     - name: Upload job history artifact
       uses: actions/upload-artifact@v4
