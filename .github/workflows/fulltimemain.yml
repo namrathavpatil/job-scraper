@@ -53,7 +53,7 @@ jobs:
         AIRTABLE_URL: ${{ secrets.AIRTABLE_URL }}
         RESEARCH_WEBHOOK_URL: ${{ secrets.RESEARCH_WEBHOOK_URL }}
         UNIVERSITY_WEBHOOK_URL: ${{ secrets.UNIVERSITY_WEBHOOK_URL }}
-      run: python import_requests.py
+      run: python import_requests1.py
 
     - name: Upload job history artifact
       uses: actions/upload-artifact@v4
