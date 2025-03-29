@@ -316,24 +316,36 @@ def filter_jobs(csv_path):
         df = pd.read_csv(csv_path)
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df = df[df['Date'].notna()]
-        df['OnlyDate'] = df['Date'].dt.normalize()
-        today = pd.Timestamp(datetime.now().date())
+        
+        # Convert to PDT timezone
+        import pytz
+        pdt_timezone = pytz.timezone('America/Los_Angeles')
+        today = datetime.now(pdt_timezone).date()
+        
+        # Create pattern for company matching
         company_pattern = '|'.join(map(re.escape, TARGET_COMPANIES))
 
+        # Filter for target companies with today's date in PDT
         company_df = df[
             df['Company'].str.contains(company_pattern, case=False, na=False) &
-            (df['OnlyDate'] == today)
+            (df['Date'].dt.date == today)
         ]
+        
+        # Filter for researcher positions
         researcher_df = df[
             df['Position Title'].str.contains('researcher', case=False, na=False)
         ]
+        
+        # Filter for university positions
         university_df = df[
             df['Company'].str.contains('university', case=False, na=False)
         ]
+        
+        # Filter for non-university researcher positions
         non_university_researcher_df = researcher_df[
             ~researcher_df['Company'].str.contains('university', case=False, na=False)
         ]
-
+        
         # Save filtered CSVs and return file paths
         def save_df(df, suffix):
             if df.empty:
@@ -355,6 +367,7 @@ def filter_jobs(csv_path):
     except Exception as e:
         logger.error(f"Error filtering jobs: {e}")
         return None, None, None
+
 
 def main():
     try:
