@@ -50,7 +50,7 @@ jobs:
       env:
         WEBHOOK_URL: ${{ secrets.WEBHOOK_URL1 }}
         
-      run: python import_requests1.py
+      run: python without_new_grad.py
 
     - name: Upload job history artifact
       uses: actions/upload-artifact@v4
