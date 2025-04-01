@@ -116,13 +116,49 @@ def save_job_history(history):
     except Exception as e:
         logger.error(f"Error saving job history: {e}")
 
+def check_existing_jobs(job):
+    """Check if a job already exists in the logged jobs file"""
+    try:
+        if not os.path.exists(LOGGED_JOBS_FILE):
+            return False
+            
+        date_str = pd.to_datetime(job['Date'], errors='coerce')
+        if pd.isna(date_str):
+            date_str = "Unknown"
+        else:
+            date_str = date_str.strftime('%Y-%m-%d')
+            
+        job_line = f"{date_str} | {job['Position Title']} | {job['Company']} | {job['Apply']}"
+        
+        with open(LOGGED_JOBS_FILE, 'r') as f:
+            for line in f:
+                if line.strip() == job_line:
+                    return True
+        return False
+    except Exception as e:
+        logger.error(f"Error checking existing jobs: {e}")
+        return False
+
 def is_new_job(job, history):
-    job_key = f"{job['Company']}_{job['Position Title']}"
+    # First check if job exists in the logged jobs file
+    if check_existing_jobs(job):
+        logger.debug(f"Job already exists in logged jobs file: {job['Company']} - {job['Position Title']}")
+        return False
+        
+    # Then check against the history set
+    date_str = pd.to_datetime(job['Date'], errors='coerce')
+    if pd.isna(date_str):
+        date_str = "Unknown"
+    else:
+        date_str = date_str.strftime('%Y-%m-%d')
+    
+    job_key = f"{job['Company']}_{job['Position Title']}_{date_str}"
+    
     if job_key not in history["seen_jobs"]:
         history["seen_jobs"].add(job_key)
-        logger.info(f"Found new job: {job['Company']} - {job['Position Title']}")
+        logger.info(f"Found new job: {job['Company']} - {job['Position Title']} ({date_str})")
         return True
-    logger.debug(f"Skipping already seen job: {job['Company']} - {job['Position Title']}")
+    logger.debug(f"Skipping already seen job: {job['Company']} - {job['Position Title']} ({date_str})")
     return False
 
 def setup_driver():
@@ -207,7 +243,7 @@ def log_sent_jobs(jobs):
         os.makedirs(BASE_DIR, exist_ok=True)  # Make sure the folder exists
         if not os.path.exists(LOGGED_JOBS_FILE):
             with open(LOGGED_JOBS_FILE, "w") as f:
-                f.write("Position Title | Company | Date\n")  # Header for first-time file
+                f.write("Date | Position Title | Company | Apply Link\n")  # Updated header with Apply Link
 
         with open(LOGGED_JOBS_FILE, "a") as f:
             for job in jobs:
@@ -216,7 +252,7 @@ def log_sent_jobs(jobs):
                     date_str = "Unknown"
                 else:
                     date_str = date_str.strftime('%Y-%m-%d')
-                f.write(f"{job['Position Title']} | {job['Company']} | {date_str}\n")
+                f.write(f"{date_str} | {job['Position Title']} | {job['Company']} | {job['Apply']}\n")
     except Exception as e:
         logger.error(f"Error logging sent jobs: {e}")
 
