@@ -185,8 +185,7 @@ def setup_driver():
     }
     chrome_options.add_experimental_option("prefs", prefs)
     chrome_options.add_argument("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-    service = Service('/usr/bin/chromedriver')
-    return webdriver.Chrome(service=service, options=chrome_options)
+    return webdriver.Chrome(options=chrome_options)
 
 def get_airtable_url_from_internlist(category_key):
     """
